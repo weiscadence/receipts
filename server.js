@@ -32,6 +32,7 @@ const ANCHOR_EVERY_MS = 6 * 3600 * 1000;
 
 const MAX_CLAIM = 500;
 const MAX_AGENT = 32;
+const MAX_INTENT = 2000; // serialized JSON chars
 const AGENT_RE = /^[a-zA-Z0-9_-]{2,32}$/;
 
 fs.mkdirSync(DATA, { recursive: true });
@@ -48,14 +49,15 @@ function chainTail() {
   return { head: headCache, seq: seqCache };
 }
 
-function appendReceipt({ agent, claim, pubkey, verified }) {
+function appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers }) {
   const { head, seq } = chainTail();
   const body = {
     seq: seq + 1,
     id: crypto.randomBytes(8).toString('hex'),
     ts: Date.now(),
     agent, claim,
-    ...(pubkey ? { pubkey, verified } : {}),
+    ...(intent ? { intent } : {}),
+    ...(pubkey ? { pubkey, verified, sigCovers } : {}),
     prev: head,
   };
   const hash = crypto.createHash('sha256').update(head + JSON.stringify(body)).digest('hex');
@@ -159,12 +161,31 @@ const server = http.createServer((req, res) => {
       const claim = String(b.claim || '').trim();
       if (!AGENT_RE.test(agent)) return json({ error: `agent: 2-${MAX_AGENT} chars, [a-zA-Z0-9_-]` }, 400);
       if (!claim || claim.length > MAX_CLAIM) return json({ error: `claim: 1-${MAX_CLAIM} chars` }, 400);
-      let pubkey = null, verified = false;
-      if (b.pubkey && b.sig) {
-        pubkey = String(b.pubkey); verified = checkSig(agent, claim, pubkey, String(b.sig));
-        if (!verified) return json({ error: 'signature verification failed (sign "receipts:<agent>:<claim>" ed25519, sig base64, pubkey base58)' }, 400);
+      // optional structured intent: the "why" behind the claim (reasoning,
+      // confidence, constraints, alternatives rejected — any JSON object).
+      // Chained like everything else, so it's tamper-evident even unsigned.
+      let intent = null;
+      if (b.intent !== undefined) {
+        if (typeof b.intent !== 'object' || b.intent === null || Array.isArray(b.intent))
+          return json({ error: 'intent: must be a JSON object' }, 400);
+        if (JSON.stringify(b.intent).length > MAX_INTENT)
+          return json({ error: `intent: serialized JSON must be ≤${MAX_INTENT} chars` }, 400);
+        intent = b.intent;
       }
-      const entry = appendReceipt({ agent, claim, pubkey, verified });
+      let pubkey = null, verified = false, sigCovers = null;
+      if (b.pubkey && b.sig) {
+        pubkey = String(b.pubkey);
+        const sig = String(b.sig);
+        // sig over claim+intent proves the rationale, not just the claim;
+        // plain claim sig still accepted so existing clients don't break
+        if (intent && checkSig(agent, `${claim}:${JSON.stringify(intent)}`, pubkey, sig)) {
+          verified = true; sigCovers = 'claim+intent';
+        } else if (checkSig(agent, claim, pubkey, sig)) {
+          verified = true; sigCovers = 'claim';
+        }
+        if (!verified) return json({ error: 'signature verification failed (sign "receipts:<agent>:<claim>" — or "receipts:<agent>:<claim>:<intent JSON>" to cover intent — ed25519, sig base64, pubkey base58)' }, 400);
+      }
+      const entry = appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers });
       json({ ok: true, receipt: entry, verify: `https://drainfun.xyz/receipts/api/receipt/${entry.id}` });
     });
     return;

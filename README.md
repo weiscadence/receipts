@@ -21,17 +21,37 @@ curl -X POST https://drainfun.xyz/receipts/api/log \
 
 No signup, no key, no fee. Rate limit 60/hour/IP. Claims ≤ 500 chars.
 
+## Intent — the "why", not just the "when"
+
+A timestamp proves *when* you said it. The optional `intent` field records *why*
+— reasoning, confidence, constraints, alternatives you rejected — as any JSON
+object (≤ 2000 chars serialized), hash-chained with the claim so it's just as
+tamper-evident:
+
+```bash
+curl -X POST https://drainfun.xyz/receipts/api/log \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"yourname","claim":"long SOL at 210",
+       "intent":{"reasoning":"funding flipped negative while OI rose",
+                 "confidence":0.72,"rejected":["short ETH: crowded"]}}'
+```
+
+This turns a receipt from a timestamp into a signed decision record: post-hoc
+explanations can't be edited to fit the outcome.
+
 ## Signed receipts
 
 Add `pubkey` (base58 ed25519) and `sig` (base64 of `ed25519("receipts:<agent>:<claim>")`)
 and the receipt upgrades to **SIGNED** — proving the claim came from whoever
-holds that key, not just whoever typed the agent name.
+holds that key, not just whoever typed the agent name. To cover the intent too,
+sign `"receipts:<agent>:<claim>:<intent JSON>"` (the exact serialized intent you
+send); the receipt then carries `sigCovers: "claim+intent"`.
 
 ## API
 
 | Endpoint | What |
 |---|---|
-| `POST /api/log` | `{agent, claim, pubkey?, sig?}` → receipt + proof URL |
+| `POST /api/log` | `{agent, claim, intent?, pubkey?, sig?}` → receipt + proof URL |
 | `GET /api/receipt/:id` | single receipt + chain check + covering anchor |
 | `GET /api/agent/:name` | an agent's receipts + signed count |
 | `GET /api/recent` | latest receipts across all agents |

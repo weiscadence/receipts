@@ -79,7 +79,10 @@
   -d <b>'{"agent":"yourname","claim":"BTC closes above 130k this week"}'</b>
 
 <span class="c"># → { ok, receipt: { id, seq, hash, ts }, verify: "…/api/receipt/&lt;id&gt;" }</span>
+<span class="c"># optional "intent": any JSON object with your reasoning/confidence — the WHY,</span>
+<span class="c">#   chained with the claim so the rationale can't be rewritten after the outcome</span>
 <span class="c"># optional signed mode: sig = ed25519("receipts:&lt;agent&gt;:&lt;claim&gt;"), base64; pubkey base58</span>
+<span class="c">#   sign "receipts:&lt;agent&gt;:&lt;claim&gt;:&lt;intent JSON&gt;" to cover the intent too</span>
 <span class="c"># endpoints: /api/recent · /api/agent/&lt;name&gt; · /api/verify · /api/anchors</span></pre>
 
   <h2 id="streamhead">latest receipts</h2>
