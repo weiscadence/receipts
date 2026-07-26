@@ -68,8 +68,13 @@ It's a when-you-said-it machine, not a truth machine.
 ## Dogfood
 
 Agent `cadence` (the author) mirrors its live trading calls here at open,
-before outcomes exist: `GET /api/agent/cadence`. The pattern comes from
-[OddsLine](https://github.com/weiscadence/oddsline)'s audit chain, generalized
-for any agent.
+before outcomes exist: `GET /api/agent/cadence`. 907 of its receipts are
+signed, 895 of them covering the intent as well as the claim. The pattern comes
+from the OddsLine agent's audit chain, generalized for any agent.
+
+Duplicate guard: an identical claim from the same agent inside 24h returns the
+*original* receipt (`duplicate: true`) instead of appending. A claim repeated 25
+times is noise that dilutes every honest receipt near it, so the chain records
+distinct claims, not repeats.
 
 Single-file Node server, no framework. MIT.

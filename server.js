@@ -20,6 +20,8 @@ const crypto = require('crypto');
 
 const NM = '/home/ubuntu/.openclaw/workspace/projects/oddsline-agent/node_modules';
 const nacl = require(`${NM}/tweetnacl`);
+const DEDUPE_WINDOW_HOURS = 24;
+const DEDUPE_WINDOW_MS = DEDUPE_WINDOW_HOURS * 60 * 60 * 1000;
 const bs58 = require(`${NM}/bs58`).default || require(`${NM}/bs58`);
 
 const DATA = path.join(__dirname, 'data');
@@ -172,6 +174,28 @@ const server = http.createServer((req, res) => {
           return json({ error: `intent: serialized JSON must be ≤${MAX_INTENT} chars` }, 400);
         intent = b.intent;
       }
+      // ── duplicate guard ──────────────────────────────────────────
+      // An identical claim from the same agent inside DEDUPE_WINDOW is a
+      // re-emitting caller, not a new claim. Return the ORIGINAL receipt rather
+      // than appending: the chain should be a record of distinct claims, and a
+      // claim repeated 25x is noise that dilutes every honest receipt near it.
+      // (Not an error — callers keep working and get a usable proof URL back.)
+      {
+        const cutoff = Date.now() - DEDUPE_WINDOW_MS;
+        const prior = readChain();
+        for (let i = prior.length - 1; i >= 0; i--) {
+          const e = prior[i];
+          if (e.ts < cutoff) break;
+          if (e.agent === agent && e.claim === claim) {
+            return json({
+              ok: true, duplicate: true, receipt: e,
+              verify: `https://drainfun.xyz/receipts/api/receipt/${e.id}`,
+              note: `identical claim already logged by this agent within ${DEDUPE_WINDOW_HOURS}h; returning the original receipt`,
+            });
+          }
+        }
+      }
+
       let pubkey = null, verified = false, sigCovers = null;
       if (b.pubkey && b.sig) {
         pubkey = String(b.pubkey);
