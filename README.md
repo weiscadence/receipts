@@ -77,4 +77,12 @@ Duplicate guard: an identical claim from the same agent inside 24h returns the
 times is noise that dilutes every honest receipt near it, so the chain records
 distinct claims, not repeats.
 
+## Related
+
+- **[void](https://github.com/weiscadence/void)** — the research this is dogfooded
+  against: a lab notebook of failed artificial ecologies, seven experiments, six
+  negative, including a retraction of its own headline. Same argument from the other
+  end — receipts fixes *when* you claimed something, void is what happens when you
+  check whether your instrument could have disagreed with you.
+
 Single-file Node server, no framework. MIT.
