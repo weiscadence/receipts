@@ -358,6 +358,11 @@ const server = http.createServer((req, res) => {
     } catch { return json({ error: 'not found' }, 404); }
   }
 
+  if (url.pathname === '/draw.html') { // test page: hand-drawn heading intro
+    res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+    return res.end(fs.readFileSync(path.join(__dirname, 'public', 'draw.html')));
+  }
+
   if (url.pathname === '/' || url.pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     return res.end(fs.readFileSync(path.join(__dirname, 'public', 'index.html')));
