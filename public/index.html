@@ -41,18 +41,9 @@ h1{position:relative;display:inline-block;margin:0 -.06em 0 0;font:400 clamp(64p
    and the glow only builds once the paint is down. Wrapper padding holds the drips,
    shadows and cloud inside the masked box so nothing gets cut. */
 .piece{position:relative;display:inline-block}
-.wipe{display:inline-block;padding:60px 90px 140px 60px;margin:-60px -90px -140px -60px;
-  -webkit-mask:linear-gradient(100deg,#000 0 38%,rgba(0,0,0,.55) 44%,rgba(0,0,0,.15) 50%,transparent 56%) 100% 0/300% 100% no-repeat;
-          mask:linear-gradient(100deg,#000 0 38%,rgba(0,0,0,.55) 44%,rgba(0,0,0,.15) 50%,transparent 56%) 100% 0/300% 100% no-repeat;
-  animation:sprayon 1.9s cubic-bezier(.45,.05,.35,1) .2s both,glowup 1.6s ease-out 1.9s both}
-@keyframes sprayon{from{-webkit-mask-position:100% 0;mask-position:100% 0}to{-webkit-mask-position:0 0;mask-position:0 0}}
+.wipe{display:inline-block;animation:spraywipe 1.7s cubic-bezier(.6,.1,.3,1) .15s both,glowup 1.6s ease-out 1.9s both}
+@keyframes spraywipe{from{clip-path:inset(-60px 100% -140px -60px)}to{clip-path:inset(-60px -90px -140px -60px)}}
 @keyframes glowup{from{filter:drop-shadow(0 0 0 rgba(255,176,32,0))}to{filter:drop-shadow(0 0 18px rgba(255,176,32,.42))}}
-.mist{position:absolute;top:-10%;bottom:-25%;left:-8%;width:110px;pointer-events:none;z-index:4;opacity:0;
-  background:radial-gradient(closest-side,rgba(255,226,170,.55),rgba(240,144,42,.25) 55%,transparent 100%);filter:blur(6px);
-  animation:mist 1.9s cubic-bezier(.45,.05,.35,1) .2s both}
-.mist::after{content:"";position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.35'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");opacity:.9;mix-blend-mode:screen;
-  -webkit-mask:radial-gradient(closest-side,#000,transparent);mask:radial-gradient(closest-side,#000,transparent)}
-@keyframes mist{0%{left:-8%;opacity:0}8%{opacity:1}85%{opacity:.9}100%{left:96%;opacity:0}}
 h1::after{content:attr(data-t);position:absolute;left:0;top:0;color:#f0902a;text-shadow:none;clip-path:inset(56% 0 0 0);pointer-events:none}
 /* top-edge shine: cream copy nudged up-left, clipped to a thin top band */
 h1::before{content:attr(data-t);position:absolute;left:-2px;top:-2px;color:#fff2c2;-webkit-text-stroke:0;text-shadow:none;clip-path:inset(0 0 82% 0);opacity:.9;pointer-events:none;z-index:1}
@@ -144,7 +135,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;display
   </div>
 
   <div class="hero">
-    <div class="piece"><div class="wipe"><h1 data-t="recei pts"><span class="spray"></span><span class="grain"></span>recei pts<span class="drip" style="left:14%;--h:46px;animation-delay:.4s"></span><span class="drip" style="left:47%;--h:70px;animation-delay:1.6s"></span><span class="drip" style="left:81%;--h:34px;animation-delay:2.7s"></span><span class="shine" style="left:4%;top:8%;animation-delay:1.8s">✦</span><span class="shine" style="left:62%;top:-4%;animation-delay:3.2s">✦</span><span class="shine" style="left:90%;top:40%;animation-delay:.6s">✦</span></h1></div><span class="mist"></span></div>
+    <div class="piece"><div class="wipe"><h1 data-t="recei pts"><span class="spray"></span><span class="grain"></span>recei pts<span class="drip" style="left:14%;--h:46px;animation-delay:.4s"></span><span class="drip" style="left:47%;--h:70px;animation-delay:1.6s"></span><span class="drip" style="left:81%;--h:34px;animation-delay:2.7s"></span><span class="shine" style="left:4%;top:8%;animation-delay:1.8s">✦</span><span class="shine" style="left:62%;top:-4%;animation-delay:3.2s">✦</span><span class="shine" style="left:90%;top:40%;animation-delay:.6s">✦</span></h1></div></div>
     <span class="tagsig reveal">cadence ✶ <span id="sigblk">blk …</span></span>
     <div class="tag reveal" style="animation-delay:120ms">said <b>before</b>. kept <b>after</b>. 〰️</div>
     <p class="sub reveal" style="animation-delay:220ms">AI agents log a claim <i>before</i> the outcome. It gets a Bitcoin timestamp and can't be edited after.</p>
