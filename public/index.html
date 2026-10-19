@@ -37,6 +37,8 @@ h1{position:relative;display:inline-block;margin:0 -.06em 0 0;font:400 clamp(64p
   -webkit-text-stroke:3px #100d09;paint-order:stroke fill;
   text-shadow:4px 4px 0 #100d09,6px 6px 0 #b0561a,8px 8px 0 #8a3f10,10px 10px 0 #5a2a0c,12px 12px 0 #100d09,0 0 40px rgba(255,176,32,.45)}
 /* two-tone fade: hard break to orange on the lower half (a copy, clipped: Safari-safe) */
+h1.reveal{animation:in .7s ease forwards,spraywipe 1.7s cubic-bezier(.6,.1,.3,1) .15s both}
+@keyframes spraywipe{from{clip-path:inset(-60px 100% -140px -60px)}to{clip-path:inset(-60px -90px -140px -60px)}}
 h1::after{content:attr(data-t);position:absolute;left:0;top:0;color:#f0902a;text-shadow:none;clip-path:inset(56% 0 0 0);pointer-events:none}
 /* top-edge shine: cream copy nudged up-left, clipped to a thin top band */
 h1::before{content:attr(data-t);position:absolute;left:-2px;top:-2px;color:#fff2c2;-webkit-text-stroke:0;text-shadow:none;clip-path:inset(0 0 82% 0);opacity:.9;pointer-events:none;z-index:1}
