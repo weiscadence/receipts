@@ -27,6 +27,15 @@ const bs58 = require(`${NM}/bs58`).default || require(`${NM}/bs58`);
 const DATA = path.join(__dirname, 'data');
 const CHAIN = path.join(DATA, 'receipts-chain.jsonl');
 const ANCHORS = path.join(DATA, 'anchors.jsonl');
+// ── epochs ──
+// v1 (Jul–Aug 2026, 914 receipts, Solana-anchored) is frozen read-only in data/archive/.
+// v2's first entry chains onto v1's final head, so the fresh start is provably a
+// continuation, not a quiet deletion: nothing in v1 can be edited without breaking v2.
+const ARCH = path.join(DATA, 'archive');
+const V1_CHAIN = path.join(ARCH, 'v1-chain.jsonl');
+const V1_ANCHORS = path.join(ARCH, 'v1-anchors.jsonl');
+const V1_HEAD = (() => { try { const l = fs.readFileSync(V1_CHAIN, 'utf8').trim().split('\n'); return JSON.parse(l[l.length - 1]).hash; } catch { return null; } })();
+const GEN = V1_HEAD ? `v1:${V1_HEAD}` : 'GENESIS';
 const KEYPAIR = process.env.WALLET_KEYPAIR || '/home/ubuntu/.config/cadence-secure/faucet-wallet.json';
 const RPC = process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 const PORT = +process.env.PORT || 3211;
@@ -47,7 +56,7 @@ function chainTail() {
     const lines = fs.readFileSync(CHAIN, 'utf8').trim().split('\n');
     const last = JSON.parse(lines[lines.length - 1]);
     headCache = last.hash; seqCache = last.seq;
-  } catch { headCache = 'GENESIS'; seqCache = -1; }
+  } catch { headCache = GEN; seqCache = -1; }
   return { head: headCache, seq: seqCache };
 }
 
@@ -84,15 +93,15 @@ function appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers }) {
   return entry;
 }
 
-function readChain() {
-  try { return fs.readFileSync(CHAIN, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)); }
+function readChain(file = CHAIN) {
+  try { return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)); }
   catch { return []; }
 }
 
-function verifyChain() {
-  let prev = 'GENESIS', n = 0;
+function verifyChain(file = CHAIN, genesis = GEN) {
+  let prev = genesis, n = 0;
   try {
-    for (const line of fs.readFileSync(CHAIN, 'utf8').trim().split('\n').filter(Boolean)) {
+    for (const line of fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean)) {
       const { hash, ...body } = JSON.parse(line);
       const expect = crypto.createHash('sha256').update(prev + JSON.stringify(body)).digest('hex');
       if (expect !== hash || body.prev !== prev) return { valid: false, brokenAt: n };
@@ -116,7 +125,7 @@ async function anchor() {
       require(`${NM}/@solana/web3.js`);
     const skip = (reason) => { console.log(`[anchor] skipped: ${reason}`); return { anchored: false, reason }; };
     const { head, seq } = chainTail();
-    if (head === 'GENESIS') return skip('empty chain');
+    if (head === GEN) return skip('empty chain');
     const last = latestAnchor();
     if (last && last.head === head) return skip('head unchanged');
     const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(KEYPAIR, 'utf8'))));
@@ -280,19 +289,20 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/verify') {
-    return json({ ...verifyChain(), latestAnchor: latestAnchor() });
+    return json({ ...verifyChain(), genesis: GEN, latestAnchor: latestAnchor() });
   }
 
   if (url.pathname.startsWith('/api/receipt/')) {
     const id = url.pathname.split('/').pop();
-    const chain = readChain();
-    const i = chain.findIndex(e => e.id === id);
+    // old proof URLs stay valid: fall back to the frozen v1 archive
+    let chain = readChain(), epoch = 'v2', i = chain.findIndex(e => e.id === id);
+    if (i === -1) { chain = readChain(V1_CHAIN); epoch = 'v1'; i = chain.findIndex(e => e.id === id); }
     if (i === -1) return json({ error: 'not found' }, 404);
-    const v = verifyChain();
-    const anchors = (() => { try { return fs.readFileSync(ANCHORS, 'utf8').trim().split('\n').map(l => JSON.parse(l)); } catch { return []; } })();
+    const v = epoch === 'v1' ? verifyChain(V1_CHAIN, 'GENESIS') : verifyChain();
+    const anchors = (() => { try { return fs.readFileSync(epoch === 'v1' ? V1_ANCHORS : ANCHORS, 'utf8').trim().split('\n').map(l => JSON.parse(l)); } catch { return []; } })();
     const coveringAnchor = anchors.find(a => a.seq >= chain[i].seq) || null;
     return json({
-      receipt: chain[i],
+      receipt: chain[i], epoch,
       chainValid: v.valid,
       chainHead: v.head,
       coveringAnchor,
@@ -314,6 +324,17 @@ const server = http.createServer((req, res) => {
       signed: chain.filter(e => e.verified).length,
       first: chain[0]?.ts || null, last: chain[chain.length - 1]?.ts || null,
       entries: chain.slice(-100),
+      archivedV1: readChain(V1_CHAIN).filter(e => e.agent === agent).length,
+    });
+  }
+
+  if (url.pathname === '/api/archive') {
+    const v1 = readChain(V1_CHAIN);
+    return json({
+      epoch: 'v1', note: 'frozen 2026-10-19; v2 genesis commits to this final head',
+      verify: verifyChain(V1_CHAIN, 'GENESIS'),
+      anchors: readChain(V1_ANCHORS).reverse(),
+      entries: v1.slice(-Math.min(+url.searchParams.get('n') || 50, 1000)).reverse(),
     });
   }
 

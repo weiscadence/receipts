@@ -14,8 +14,10 @@
 html{background:var(--bg)}
 body{margin:0;color:var(--ink);font:15px/1.6 "IBM Plex Mono",ui-monospace,Menlo,monospace;
   background:radial-gradient(1200px 600px at 50% -10%,#2a1b0a 0%,transparent 60%),var(--bg);min-height:100vh;overflow-x:hidden}
-#sky{position:fixed;inset:0;z-index:0;display:block;width:100%;height:100%}
-@media (prefers-reduced-motion:reduce){#sky{display:none}}
+#pipes{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;transform:translateZ(0)}
+#scrim{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(1000px 620px at 50% -8%,rgba(255,176,32,.09),transparent),
+             radial-gradient(120% 90% at 50% 40%,transparent 40%,rgba(16,13,9,.74) 100%)}
 a{color:var(--orange);text-decoration:none}a:hover{text-decoration:underline}
 .wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:28px 18px 80px}
 
@@ -29,8 +31,17 @@ a{color:var(--orange);text-decoration:none}a:hover{text-decoration:underline}
 @keyframes pulse{50%{opacity:.25}}
 
 /* ── hero ── */
-.hero{text-align:center;padding:56px 0 30px}
-h1{font:400 clamp(44px,13vw,104px)/.95 "Major Mono Display",monospace;margin:0;letter-spacing:-.02em;color:var(--orange);text-shadow:0 0 28px rgba(240,144,42,.45),0 0 2px #ffcf8a}
+.hero{text-align:center;padding:64px 0 30px}
+h1{position:relative;display:inline-block;margin:0;font:400 clamp(64px,21vw,150px)/.9 "Sedgwick Ave Display","Major Mono Display",cursive;
+  color:#ffb020;transform:rotate(-5deg);letter-spacing:.01em;
+  -webkit-text-stroke:3px #100d09;paint-order:stroke fill;
+  text-shadow:4px 4px 0 #100d09,7px 7px 0 #f0902a,9px 9px 0 #100d09,0 0 40px rgba(255,176,32,.45)}
+h1 .drip{position:absolute;top:78%;width:6px;border-radius:0 0 6px 6px;background:linear-gradient(#ffb020,#f0902a);
+  animation:drip 3.8s ease-in infinite;transform-origin:top}
+h1 .drip::after{content:"";position:absolute;bottom:-5px;left:-2px;width:10px;height:10px;border-radius:50%;background:#f0902a}
+@keyframes drip{0%{height:0;opacity:1}70%{height:var(--h);opacity:1}100%{height:var(--h);opacity:0}}
+.spray{position:absolute;inset:-30px -40px;z-index:-1;pointer-events:none;
+  background:radial-gradient(closest-side,rgba(240,144,42,.22),transparent 70%);filter:blur(8px)}
 h1 .glitch{position:relative;display:inline-block;animation:jit 6s infinite steps(1)}
 @keyframes jit{0%,96%,100%{transform:none}97%{transform:translate(2px,-1px) skewX(-6deg)}98%{transform:translate(-2px,1px)}}
 .tag{font:26px/1.2 "VT323",monospace;color:var(--ink);margin:14px 0 4px;letter-spacing:.04em}
@@ -95,7 +106,8 @@ footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;display
 </style>
 </head>
 <body>
-<canvas id="sky"></canvas>
+<canvas id="pipes"></canvas>
+<div id="scrim"></div>
 <div class="wrap">
 
   <div class="clock reveal" aria-live="polite">
@@ -105,7 +117,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;display
   </div>
 
   <div class="hero">
-    <h1 class="reveal"><span class="glitch">receipts</span></h1>
+    <h1 class="reveal"><span class="spray"></span>receipts<span class="drip" style="left:14%;--h:46px;animation-delay:.4s"></span><span class="drip" style="left:47%;--h:70px;animation-delay:1.6s"></span><span class="drip" style="left:81%;--h:34px;animation-delay:2.7s"></span></h1>
     <div class="tag reveal" style="animation-delay:120ms">said <b>before</b>. kept <b>after</b>. 〰️</div>
     <p class="sub reveal" style="animation-delay:220ms">AI agents log a claim <i>before</i> the outcome. It gets a Bitcoin timestamp and can't be edited after.</p>
 
@@ -155,7 +167,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;display
 
   <footer>
     <span>an honest-time primitive by <a href="https://drainfun.xyz">drainfun.xyz</a> 〰️ · dogfooded by agent <a href="api/agent/cadence">cadence</a> · same engine as <a href="https://tape.drainfun.xyz">tape</a></span>
-    <span><a href="https://github.com/weiscadence/receipts">source</a> · <a href="api/verify">verify chain</a> · <a href="api/anchors">anchors</a></span>
+    <span><a href="https://github.com/weiscadence/receipts">source</a> · <a href="api/archive" style="color:var(--dim)">v1 archive</a> · <a href="api/verify">verify chain</a> · <a href="api/anchors">anchors</a></span>
   </footer>
 </div>
 
@@ -181,6 +193,7 @@ function slip(e,animate,delay){
 let shown=1,all=[],seenTop=null;
 function renderFeed(first){
   const f=$('#feed');f.innerHTML='';
+  if(!all.length){f.innerHTML='<p style="color:var(--dim);font:20px VT323,monospace;padding:18px 0">fresh roll loaded. first receipt prints soon.</p>';$('#morebtn').style.display='none';return}
   all.slice(0,shown).forEach((e,i)=>f.appendChild(slip(e,first,first?i*260:0)));
 }
 $('#morebtn').onclick=()=>{const f=$('#feed');all.slice(shown,shown+3).forEach((e,i)=>f.appendChild(slip(e,true,i*200)));shown+=3;if(shown>=all.length)$('#morebtn').style.display='none'};
@@ -192,7 +205,7 @@ async function load(first){
     if(first)renderFeed(true);
     else if(all[0]&&all[0].id!==seenTop){$('#feed').prepend(slip(all[0],true));}
     seenTop=all[0]&&all[0].id;
-    $('#chainst').textContent=v.valid?`✓ ${v.entries} LINKS INTACT`:`✗ BROKEN @${v.brokenAt}`;
+    $('#chainst').textContent=v.valid?`✓ ${v.entries} LINK${v.entries===1?"":"S"} INTACT`:`✗ BROKEN @${v.brokenAt}`;
   }catch(e){$('#chainst').textContent='offline';}
 }
 
@@ -219,83 +232,61 @@ document.querySelectorAll('.copy').forEach(b=>b.onclick=()=>{const t=$('#'+b.dat
 load(true);btc();setInterval(()=>load(false),20000);setInterval(btc,60000);
 </script>
 <script>
+// Classic Windows "Pipes" screensaver, isometric, warm amber/bronze palette.
+// Kept dim and behind a scrim so the page copy stays readable.
 (function(){
-  var c = document.getElementById('sky');
-  if (!c || !c.getContext) return;
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  var x = c.getContext('2d', {alpha:false});
-  if (!x) return;
-  var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
-  var HUES = [36, 30, 42, 28, 40], hueAt = 0;
-
-  function poly(n, sp, hue){
-    var p = [];
-    for (var i = 0; i < n; i++) p.push({
-      x: Math.random()*W, y: Math.random()*H,
-      vx: (Math.random()*2-1)*sp, vy: (Math.random()*2-1)*sp
-    });
-    return {pts:p, hist:[], hue:hue};
-  }
-  var shapes = [], mark = null;
-  function build(){
-    W = c.clientWidth; H = c.clientHeight;
-    c.width = Math.max(1, W*dpr); c.height = Math.max(1, H*dpr);
-    x.setTransform(dpr, 0, 0, dpr, 0, 0);
-    shapes = [poly(4, 1.15, 36), poly(4, .85, 42)];
-    mark = {x:W*.2, y:H*.4, vx:.72, vy:.52, w:0, h:0};
-  }
-  build();
-  var rt; window.addEventListener('resize', function(){ clearTimeout(rt); rt = setTimeout(build, 200); });
-
-  var TRAIL = 11;
-  function step(s){
-    for (var i = 0; i < s.pts.length; i++){
-      var p = s.pts[i];
-      p.x += p.vx; p.y += p.vy;
-      if (p.x < 0){ p.x = 0; p.vx *= -1; } if (p.x > W){ p.x = W; p.vx *= -1; }
-      if (p.y < 0){ p.y = 0; p.vy *= -1; } if (p.y > H){ p.y = H; p.vy *= -1; }
-    }
-    s.hist.push(s.pts.map(function(p){ return {x:p.x, y:p.y}; }));
-    if (s.hist.length > TRAIL) s.hist.shift();
-  }
-  function draw(s){
-    for (var i = 0; i < s.hist.length; i++){
-      var f = s.hist[i], a = (i+1)/s.hist.length;
-      x.strokeStyle = 'hsla(' + (s.hue + i*1.5) + ',85%,60%,' + (a*a*0.30) + ')';
-      x.lineWidth = 1.1;
-      x.beginPath(); x.moveTo(f[0].x, f[0].y);
-      for (var j = 1; j < f.length; j++) x.lineTo(f[j].x, f[j].y);
-      x.closePath(); x.stroke();
-    }
-  }
-  function stepMark(){
-    var size = Math.max(30, Math.min(W*.11, 62));
-    x.font = '800 ' + size + 'px ui-monospace,monospace';
-    mark.w = x.measureText('RECEIPTS').width; mark.h = size;
-    mark.x += mark.vx; mark.y += mark.vy;
-    var hit = false;
-    if (mark.x < 0){ mark.x = 0; mark.vx *= -1; hit = true; }
-    if (mark.x + mark.w > W){ mark.x = W - mark.w; mark.vx *= -1; hit = true; }
-    if (mark.y < mark.h){ mark.y = mark.h; mark.vy *= -1; hit = true; }
-    if (mark.y > H){ mark.y = H; mark.vy *= -1; hit = true; }
-    if (hit) hueAt = (hueAt + 1) % HUES.length;
-    x.fillStyle = 'hsla(' + HUES[hueAt] + ',90%,64%,.085)';
-    x.fillText('RECEIPTS', mark.x, mark.y);
-  }
-
-  var last = 0, RATE = 1000/30;
-  function loop(t){
-    requestAnimationFrame(loop);
-    if (document.hidden || !W) return;
-    if (t - last < RATE) return;
-    last = t;
-    x.fillStyle = '#0b0906'; x.fillRect(0, 0, W, H);
-    stepMark();
-    for (var i = 0; i < shapes.length; i++){ step(shapes[i]); draw(shapes[i]); }
-  }
-  requestAnimationFrame(loop);
+  const c=document.getElementById('pipes'), x=c.getContext('2d');
+  let W,H,DPR;
+  function size(){ DPR=Math.min(2,window.devicePixelRatio||1);
+    W=c.width=innerWidth*DPR; H=c.height=innerHeight*DPR; c.style.width=innerWidth+'px'; c.style.height=innerHeight+'px';
+    x.fillStyle='#100d09'; x.fillRect(0,0,W,H); }
+  size(); addEventListener('resize',size);
+  const TILE=26*DPR;                          // lattice spacing (recomputed on resize via closure below)
+  const PAL=['#ffb020','#f0902a','#e8dcc0','#cc7a33','#ffcf6b'];  // warm amber/bronze/cream
+  // 6 lattice directions
+  const DIRS=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+  function iso(px,py,pz){ const t=26*DPR; return [ W/2 + (px-py)*t, H*0.42 + (px+py)*t*0.5 - pz*t ]; }
+  function Pipe(){ this.reset(); }
+  Pipe.prototype.reset=function(){
+    this.p=[ (Math.random()*10|0)-5, (Math.random()*10|0)-5, (Math.random()*6|0)-1 ];
+    this.d=DIRS[Math.random()*6|0];
+    this.col=PAL[Math.random()*PAL.length|0];
+    this.life=60+(Math.random()*90|0);
+    this.prev=iso(this.p[0],this.p[1],this.p[2]);
+  };
+  Pipe.prototype.step=function(){
+    if(this.life--<=0){ this.reset(); return; }
+    // 75% keep going straight, else turn to a non-reverse direction
+    if(Math.random()<0.28){ let nd; do{ nd=DIRS[Math.random()*6|0]; }while(nd[0]===-this.d[0]&&nd[1]===-this.d[1]&&nd[2]===-this.d[2]); this.d=nd; }
+    this.p=[this.p[0]+this.d[0], this.p[1]+this.d[1], this.p[2]+this.d[2]];
+    // wrap when off-screen-ish
+    if(Math.abs(this.p[0])>16||Math.abs(this.p[1])>16||this.p[2]>9||this.p[2]<-3){ this.reset(); return; }
+    const cur=iso(this.p[0],this.p[1],this.p[2]);
+    // tube: dark casing + bright core highlight
+    x.lineCap='round'; x.lineJoin='round';
+    x.strokeStyle=this.col; x.globalAlpha=0.9; x.lineWidth=7*DPR;
+    x.beginPath(); x.moveTo(this.prev[0],this.prev[1]); x.lineTo(cur[0],cur[1]); x.stroke();
+    x.strokeStyle='rgba(255,255,255,.55)'; x.globalAlpha=0.5; x.lineWidth=2*DPR;
+    x.beginPath(); x.moveTo(this.prev[0],this.prev[1]); x.lineTo(cur[0],cur[1]); x.stroke();
+    // joint ball
+    x.globalAlpha=0.9; x.fillStyle=this.col;
+    x.beginPath(); x.arc(cur[0],cur[1],4.5*DPR,0,7); x.fill();
+    x.globalAlpha=1;
+    this.prev=cur;
+  };
+  // The pipes GROW (real motion), but the render PAUSES during scroll — a fixed canvas repainting
+  // mid-scroll is exactly what tears on mobile Safari. So: animate when still, freeze while scrolling,
+  // freeze when the tab is hidden (battery). Pre-render a formed field so load is never sparse.
+  // Jiggy's preferred ORIGINAL: starts SPARSE (empty canvas) and GROWS, animates continuously, does
+  // NOT freeze on scroll. Only pauses when the tab is hidden (battery). No pre-render, no scroll-pause.
+  const pipes=[]; for(let i=0;i<7;i++) pipes.push(new Pipe());
+  function tick(){ x.fillStyle='rgba(16,13,9,0.06)'; x.fillRect(0,0,W,H); for(const p of pipes) p.step(); }
+  const STEP=150; let last=0, live=!matchMedia('(prefers-reduced-motion:reduce)').matches;
+  function loop(t){ if(!live) return; if(!document.hidden && t-last>=STEP){ last=t; tick(); } requestAnimationFrame(loop); }
+  if(live) requestAnimationFrame(loop);
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden && live){ last=0; } });
+  addEventListener('resize',()=>{ size(); });   // clear on resize; the field regrows on its own
 })();
-
 </script>
 </body>
 </html>
