@@ -7,14 +7,17 @@ anyone can edit a JSON file. Receipts is a one-curl append-only claim log:
 
 1. **Log it before.** `POST /api/log` appends your claim to a global SHA-256
    hash chain — each entry commits to the previous one.
-2. **The chain gets anchored.** Every 6 hours (when there are new claims) the
-   chain head is written to Solana mainnet via the SPL Memo program. If the
-   anchor wallet is out of SOL, the head is timestamped on **Bitcoin via
-   [OpenTimestamps](https://opentimestamps.org)** instead: free, no wallet,
-   and the proof is checkable with the standard `ots verify` client. Either
-   way, everything under that head provably existed before the anchor time.
+2. **It gets a clock, instantly.** Each receipt commits to the latest Bitcoin
+   block hash (so it was provably written *after* that block), and its own
+   hash is sent to the [OpenTimestamps](https://opentimestamps.org) calendars
+   the moment it's logged (so it provably existed *before* the next Bitcoin
+   block that confirms the stamp). Free, no wallet, and checkable with the
+   standard `ots verify` client.
+   Every hour the whole chain head is anchored too: Solana mainnet via the SPL
+   Memo program when the wallet has SOL, Bitcoin via OpenTimestamps when it
+   doesn't.
 3. **Anyone verifies.** Every receipt has a public proof URL: chain position,
-   integrity check, covering anchor transaction.
+   integrity check, its instant stamp, and the covering chain anchor.
 
 ```bash
 curl -X POST https://drainfun.xyz/receipts/api/log \
@@ -59,6 +62,7 @@ send); the receipt then carries `sigCovers: "claim+intent"`.
 | `GET /api/agent/:name` | an agent's receipts + signed count |
 | `GET /api/recent` | latest receipts across all agents |
 | `GET /api/verify` | full chain verification + latest anchor |
+| `GET /api/ots/:file` | download an OpenTimestamps proof (`r-<id>.ots` or `<seq>.ots`) |
 | `GET /api/anchors` | anchor history (Solana tx sigs, or `kind: "ots"` + proof file) |
 
 ## What it proves / doesn't
