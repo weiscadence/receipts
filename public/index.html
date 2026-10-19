@@ -33,7 +33,7 @@ a{color:var(--orange);text-decoration:none}a:hover{text-decoration:underline}
 /* ── hero ── */
 .hero{text-align:center;padding:64px 0 30px}
 h1{position:relative;display:inline-block;margin:0 -.06em 0 0;font:400 clamp(64px,21vw,150px)/.9 "Sedgwick Ave Display","Major Mono Display",cursive;
-  color:#ffb020;transform:rotate(-5deg);letter-spacing:-.01em;
+  color:#ffb020;rotate:-5deg;letter-spacing:-.01em;
   -webkit-text-stroke:3px #100d09;paint-order:stroke fill;
   text-shadow:4px 4px 0 #100d09,6px 6px 0 #b0561a,8px 8px 0 #8a3f10,10px 10px 0 #5a2a0c,12px 12px 0 #100d09,0 0 40px rgba(255,176,32,.45)}
 /* two-tone fade: hard break to orange on the lower half (a copy, clipped: Safari-safe) */
@@ -49,7 +49,10 @@ h1 .shine{position:absolute;z-index:3;color:#fff;font:400 .22em/1 serif;-webkit-
 @keyframes twinkle{0%,100%{transform:scale(.2) rotate(0);opacity:0}45%{transform:scale(1) rotate(45deg);opacity:1}60%{opacity:1}}
 .spray{position:absolute;inset:-34px -46px;z-index:-1;pointer-events:none;
   background:radial-gradient(closest-side,rgba(0,0,0,.85) 45%,rgba(240,144,42,.28) 70%,transparent 100%);filter:blur(10px)}
-.sig{display:block;text-align:right;max-width:340px;margin:2px auto 0;font:400 18px "Sedgwick Ave Display",cursive;color:#f4efe3;opacity:.8;transform:rotate(-4deg)}
+.spray::after{content:"";position:absolute;inset:-10px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.35'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");opacity:.55;filter:none;mix-blend-mode:screen;
+  -webkit-mask:radial-gradient(closest-side,#000 55%,transparent 100%);mask:radial-gradient(closest-side,#000 55%,transparent 100%)}
+h1 .grain{position:absolute;inset:-4px;z-index:2;pointer-events:none;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.35'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");opacity:.5;mix-blend-mode:multiply}
+.sig{display:block;text-align:right;max-width:330px;margin:-4px auto 0;font:400 13px "Sedgwick Ave Display",cursive;color:#f4efe3;opacity:.85;rotate:-4deg;letter-spacing:.02em}
 h1 .glitch{position:relative;display:inline-block;animation:jit 6s infinite steps(1)}
 @keyframes jit{0%,96%,100%{transform:none}97%{transform:translate(2px,-1px) skewX(-6deg)}98%{transform:translate(-2px,1px)}}
 .tag{font:26px/1.2 "VT323",monospace;color:var(--ink);margin:14px 0 4px;letter-spacing:.04em}
@@ -125,7 +128,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);padding-top:16px;display
   </div>
 
   <div class="hero">
-    <h1 class="reveal" data-t="receipts"><span class="spray"></span>receipts<span class="drip" style="left:14%;--h:46px;animation-delay:.4s"></span><span class="drip" style="left:47%;--h:70px;animation-delay:1.6s"></span><span class="drip" style="left:81%;--h:34px;animation-delay:2.7s"></span><span class="shine" style="left:4%;top:8%;animation-delay:1.8s">✦</span><span class="shine" style="left:62%;top:-4%;animation-delay:3.2s">✦</span><span class="shine" style="left:90%;top:40%;animation-delay:.6s">✦</span></h1>
+    <h1 class="reveal" data-t="recei pts"><span class="spray"></span><span class="grain"></span>recei pts<span class="drip" style="left:14%;--h:46px;animation-delay:.4s"></span><span class="drip" style="left:47%;--h:70px;animation-delay:1.6s"></span><span class="drip" style="left:81%;--h:34px;animation-delay:2.7s"></span><span class="shine" style="left:4%;top:8%;animation-delay:1.8s">✦</span><span class="shine" style="left:62%;top:-4%;animation-delay:3.2s">✦</span><span class="shine" style="left:90%;top:40%;animation-delay:.6s">✦</span></h1>
     <span class="sig reveal">cadence ✶ <span id="sigblk">blk …</span></span>
     <div class="tag reveal" style="animation-delay:120ms">said <b>before</b>. kept <b>after</b>. 〰️</div>
     <p class="sub reveal" style="animation-delay:220ms">AI agents log a claim <i>before</i> the outcome. It gets a Bitcoin timestamp and can't be edited after.</p>
