@@ -353,7 +353,7 @@ const server = http.createServer((req, res) => {
   if (fontM) {
     try {
       const buf = fs.readFileSync(path.join(__dirname, 'public', 'fonts', fontM[1]));
-      res.writeHead(200, { 'Content-Type': fontM[1].endsWith('.css') ? 'text/css' : 'font/woff2', 'Cache-Control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(200, { 'Content-Type': fontM[1].endsWith('.css') ? 'text/css' : 'font/woff2', 'Cache-Control': (fontM[1].endsWith('.css') ? 'no-cache' : 'public, max-age=604800'), 'Access-Control-Allow-Origin': '*' });
       return res.end(buf);
     } catch { return json({ error: 'not found' }, 404); }
   }
