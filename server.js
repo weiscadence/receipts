@@ -30,7 +30,7 @@ const ANCHORS = path.join(DATA, 'anchors.jsonl');
 const KEYPAIR = process.env.WALLET_KEYPAIR || '/home/ubuntu/.config/cadence-secure/faucet-wallet.json';
 const RPC = process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 const PORT = +process.env.PORT || 3211;
-const ANCHOR_EVERY_MS = 6 * 3600 * 1000;
+const ANCHOR_EVERY_MS = 3600 * 1000; // hourly chain-head anchor (OTS is free, so no reason to wait 6h)
 
 const MAX_CLAIM = 500;
 const MAX_AGENT = 32;
@@ -51,6 +51,20 @@ function chainTail() {
   return { head: headCache, seq: seqCache };
 }
 
+// ── bitcoin clock: lower bound on time ────────────────────────────
+// Each receipt commits to the latest Bitcoin block hash it saw. Nobody can know
+// a block hash before the block is mined, so the receipt provably was written
+// AFTER that block. The OTS stamp below bounds it from the other side (BEFORE).
+let btcTip = null;
+async function refreshBtcTip() {
+  try {
+    const r = await fetch('https://mempool.space/api/blocks/tip/hash', { signal: AbortSignal.timeout(8000) });
+    const h = await fetch('https://mempool.space/api/blocks/tip/height', { signal: AbortSignal.timeout(8000) });
+    if (r.ok && h.ok) btcTip = { btcHash: (await r.text()).trim(), btcHeight: +(await h.text()) };
+  } catch {}
+}
+refreshBtcTip(); setInterval(refreshBtcTip, 60 * 1000);
+
 function appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers }) {
   const { head, seq } = chainTail();
   const body = {
@@ -60,6 +74,7 @@ function appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers }) {
     agent, claim,
     ...(intent ? { intent } : {}),
     ...(pubkey ? { pubkey, verified, sigCovers } : {}),
+    ...(btcTip ? { after: btcTip } : {}),
     prev: head,
   };
   const hash = crypto.createHash('sha256').update(head + JSON.stringify(body)).digest('hex');
@@ -106,7 +121,7 @@ async function anchor() {
     if (last && last.head === head) return skip('head unchanged');
     const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(KEYPAIR, 'utf8'))));
     const conn = new Connection(RPC, 'confirmed');
-    if (await conn.getBalance(kp.publicKey) < 10000) return skip('wallet unfunded');
+    if (await conn.getBalance(kp.publicKey) < 10000) return otsAnchor(seq, head);
     const ix = new TransactionInstruction({
       keys: [], programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
       data: Buffer.from(`receipts:${seq}:${head}`, 'utf8'),
@@ -120,6 +135,40 @@ async function anchor() {
     console.log('[anchor] failed:', e.message);
     return { anchored: false, reason: e.message };
   }
+}
+
+// ── free fallback: OpenTimestamps (Bitcoin) when the Solana wallet is dry ──
+// Submits the 32-byte chain head to public OTS calendars. The returned proof
+// is "pending" until a calendar commits it to a Bitcoin block (~hours); run
+// `ots upgrade data/ots/<seq>.ots` later to get the full Bitcoin attestation.
+const OTS_DIR = path.join(DATA, 'ots');
+const OTS_CALENDARS = ['https://a.pool.opentimestamps.org', 'https://b.pool.opentimestamps.org'];
+async function otsStamp(hexDigest, name, timeoutMs = 20000) {
+  const digest = Buffer.from(hexDigest, 'hex');
+  for (const cal of OTS_CALENDARS) {
+    try {
+      const r = await fetch(`${cal}/digest`, {
+        method: 'POST', body: digest,
+        headers: { Accept: 'application/vnd.opentimestamps.v1' }, signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!r.ok) continue;
+      const pending = Buffer.from(await r.arrayBuffer());
+      const magic = Buffer.from('004f70656e54696d657374616d7073000050726f6f6600bf89e2e884e89294', 'hex');
+      fs.mkdirSync(OTS_DIR, { recursive: true });
+      fs.writeFileSync(path.join(OTS_DIR, name), Buffer.concat([magic, Buffer.from([0x01, 0x08]), digest, pending]));
+      return { calendar: cal, proof: `https://drainfun.xyz/receipts/api/ots/${name}` };
+    } catch (e) { console.log(`[ots] ${cal} failed:`, e.message); }
+  }
+  return null;
+}
+
+async function otsAnchor(seq, head) {
+  const stamp = await otsStamp(head, `${seq}.ots`);
+  if (!stamp) { console.log('[anchor] skipped: wallet unfunded and no OTS calendar reachable'); return { anchored: false, reason: 'wallet unfunded; OTS unreachable' }; }
+  const rec = { ts: Date.now(), seq, head, kind: 'ots', ...stamp };
+  fs.appendFileSync(ANCHORS, JSON.stringify(rec) + '\n');
+  console.log(`[anchor] seq ${seq} head ${head.slice(0, 12)}… OTS via ${stamp.calendar}`);
+  return { anchored: true, ...rec };
 }
 
 // ── signature check (optional upgrade to "signed") ────────────────
@@ -210,9 +259,24 @@ const server = http.createServer((req, res) => {
         if (!verified) return json({ error: 'signature verification failed (sign "receipts:<agent>:<claim>" — or "receipts:<agent>:<claim>:<intent JSON>" to cover intent — ed25519, sig base64, pubkey base58)' }, 400);
       }
       const entry = appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers });
-      json({ ok: true, receipt: entry, verify: `https://drainfun.xyz/receipts/api/receipt/${entry.id}` });
+      // instant stamp: this receipt's own hash goes to the OTS calendars right now
+      // (calendar-attested in ~1s, Bitcoin-confirmed within hours). The chain is
+      // also anchored hourly; this just closes the gap for each claim.
+      otsStamp(entry.hash, `r-${entry.id}.ots`, 5000).then(stamp => json({
+        ok: true, receipt: entry, stamp: stamp || 'calendar unreachable; covered by next hourly anchor',
+        verify: `https://drainfun.xyz/receipts/api/receipt/${entry.id}`,
+      }));
     });
     return;
+  }
+
+  const otsM = url.pathname.match(/^\/api\/ots\/((?:r-[0-9a-f]{16}|\d+)\.ots)$/);
+  if (otsM) {
+    try {
+      const buf = fs.readFileSync(path.join(OTS_DIR, otsM[1]));
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': '*' });
+      return res.end(buf);
+    } catch { return json({ error: 'no such proof' }, 404); }
   }
 
   if (url.pathname === '/api/verify') {
@@ -232,9 +296,13 @@ const server = http.createServer((req, res) => {
       chainValid: v.valid,
       chainHead: v.head,
       coveringAnchor,
+      instantStamp: fs.existsSync(path.join(OTS_DIR, `r-${chain[i].id}.ots`))
+        ? `https://drainfun.xyz/receipts/api/ots/r-${chain[i].id}.ots` : null,
+      after: chain[i].after
+        ? `written after Bitcoin block ${chain[i].after.btcHeight} (${chain[i].after.btcHash})` : null,
       proves: coveringAnchor
-        ? `this claim existed at or before ${new Date(coveringAnchor.ts).toISOString()} (Solana tx ${coveringAnchor.txSig})`
-        : 'claim is chained but not yet covered by an on-chain anchor (next anchor within 6h)',
+        ? `this claim existed at or before ${new Date(coveringAnchor.ts).toISOString()} (${coveringAnchor.kind === 'ots' ? `Bitcoin via OpenTimestamps, proof ${coveringAnchor.proof}` : `Solana tx ${coveringAnchor.txSig}`})`
+        : 'claim is chained but not yet covered by a chain anchor (next anchor within 1h); see instantStamp',
     });
   }
 

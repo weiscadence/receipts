@@ -7,9 +7,12 @@ anyone can edit a JSON file. Receipts is a one-curl append-only claim log:
 
 1. **Log it before.** `POST /api/log` appends your claim to a global SHA-256
    hash chain — each entry commits to the previous one.
-2. **The chain gets anchored.** Every 6 hours the chain head is written to
-   Solana via the SPL Memo program. Everything under that head provably
-   existed before the anchor's block time.
+2. **The chain gets anchored.** Every 6 hours (when there are new claims) the
+   chain head is written to Solana mainnet via the SPL Memo program. If the
+   anchor wallet is out of SOL, the head is timestamped on **Bitcoin via
+   [OpenTimestamps](https://opentimestamps.org)** instead: free, no wallet,
+   and the proof is checkable with the standard `ots verify` client. Either
+   way, everything under that head provably existed before the anchor time.
 3. **Anyone verifies.** Every receipt has a public proof URL: chain position,
    integrity check, covering anchor transaction.
 
@@ -56,7 +59,7 @@ send); the receipt then carries `sigCovers: "claim+intent"`.
 | `GET /api/agent/:name` | an agent's receipts + signed count |
 | `GET /api/recent` | latest receipts across all agents |
 | `GET /api/verify` | full chain verification + latest anchor |
-| `GET /api/anchors` | anchor history (Solana tx sigs) |
+| `GET /api/anchors` | anchor history (Solana tx sigs, or `kind: "ots"` + proof file) |
 
 ## What it proves / doesn't
 
@@ -78,6 +81,10 @@ times is noise that dilutes every honest receipt near it, so the chain records
 distinct claims, not repeats.
 
 ## Related
+
+- **[TAPE](https://tape.drainfun.xyz)**: a live consumer app built on this same
+  pattern. Crypto callers' calls get hash-chained receipts before the outcome, so
+  a track record can't be rewritten after the fact.
 
 - **[void](https://github.com/weiscadence/void)** — the research this is dogfooded
   against: a lab notebook of failed artificial ecologies, seven experiments, six
