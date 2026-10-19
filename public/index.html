@@ -37,9 +37,7 @@ h1{position:relative;display:inline-block;margin:0 -.06em 0 0;font:400 clamp(64p
   -webkit-text-stroke:3px #100d09;paint-order:stroke fill;
   text-shadow:4px 4px 0 #100d09,6px 6px 0 #b0561a,8px 8px 0 #8a3f10,10px 10px 0 #5a2a0c,12px 12px 0 #100d09}
 /* two-tone fade: hard break to orange on the lower half (a copy, clipped: Safari-safe) */
-/* spray-on: a soft feathered mask sweeps like a can, a mist puff rides the edge,
-   and the glow only builds once the paint is down. Wrapper padding holds the drips,
-   shadows and cloud inside the masked box so nothing gets cut. */
+/* spray-on: wipe reveals the piece left to right; glow builds only after the paint lands */
 .piece{position:relative;display:inline-block}
 .wipe{display:inline-block;animation:spraywipe 1.7s cubic-bezier(.6,.1,.3,1) .15s both,glowup 1.6s ease-out 1.9s both}
 @keyframes spraywipe{from{clip-path:inset(-60px 100% -140px -60px)}to{clip-path:inset(-60px -90px -140px -60px)}}
