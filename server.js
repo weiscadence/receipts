@@ -327,6 +327,16 @@ const server = http.createServer((req, res) => {
     catch { return json([]); }
   }
 
+  // self-hosted fonts: visitors' IPs stay off Google's logs (pages-privacy rule)
+  const fontM = url.pathname.match(/^\/fonts\/([a-zA-Z0-9._-]+\.(?:css|woff2))$/);
+  if (fontM) {
+    try {
+      const buf = fs.readFileSync(path.join(__dirname, 'public', 'fonts', fontM[1]));
+      res.writeHead(200, { 'Content-Type': fontM[1].endsWith('.css') ? 'text/css' : 'font/woff2', 'Cache-Control': 'public, max-age=604800', 'Access-Control-Allow-Origin': '*' });
+      return res.end(buf);
+    } catch { return json({ error: 'not found' }, 404); }
+  }
+
   if (url.pathname === '/' || url.pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     return res.end(fs.readFileSync(path.join(__dirname, 'public', 'index.html')));
