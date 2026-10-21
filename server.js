@@ -18,13 +18,16 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const NM = '/home/ubuntu/.openclaw/workspace/projects/oddsline-agent/node_modules';
-const nacl = require(`${NM}/tweetnacl`);
+// Dependencies resolve from this repo's node_modules (npm install); RECEIPTS_NM overrides for the
+// production box, which keeps them in a shared tree.
+const NM = process.env.RECEIPTS_NM;
+const dep = (m) => require(NM ? `${NM}/${m}` : m);
+const nacl = dep('tweetnacl');
 const DEDUPE_WINDOW_HOURS = 24;
 const DEDUPE_WINDOW_MS = DEDUPE_WINDOW_HOURS * 60 * 60 * 1000;
-const bs58 = require(`${NM}/bs58`).default || require(`${NM}/bs58`);
+const bs58 = dep('bs58').default || dep('bs58');
 
-const DATA = path.join(__dirname, 'data');
+const DATA = process.env.RECEIPTS_DATA || path.join(__dirname, 'data');
 const CHAIN = path.join(DATA, 'receipts-chain.jsonl');
 const ANCHORS = path.join(DATA, 'anchors.jsonl');
 // ── epochs ──
@@ -36,7 +39,7 @@ const V1_CHAIN = path.join(ARCH, 'v1-chain.jsonl');
 const V1_ANCHORS = path.join(ARCH, 'v1-anchors.jsonl');
 const V1_HEAD = (() => { try { const l = fs.readFileSync(V1_CHAIN, 'utf8').trim().split('\n'); return JSON.parse(l[l.length - 1]).hash; } catch { return null; } })();
 const GEN = V1_HEAD ? `v1:${V1_HEAD}` : 'GENESIS';
-const KEYPAIR = process.env.WALLET_KEYPAIR || '/home/ubuntu/.config/cadence-secure/faucet-wallet.json';
+const KEYPAIR = process.env.WALLET_KEYPAIR; // unset = Solana anchoring skipped (OTS + BTC bracket still run)
 const RPC = process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 const PORT = +process.env.PORT || 3211;
 const ANCHOR_EVERY_MS = 3600 * 1000; // hourly chain-head anchor (OTS is free, so no reason to wait 6h)
@@ -122,12 +125,13 @@ function latestAnchor() {
 async function anchor() {
   try {
     const { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, sendAndConfirmTransaction } =
-      require(`${NM}/@solana/web3.js`);
+      dep('@solana/web3.js');
     const skip = (reason) => { console.log(`[anchor] skipped: ${reason}`); return { anchored: false, reason }; };
     const { head, seq } = chainTail();
     if (head === GEN) return skip('empty chain');
     const last = latestAnchor();
     if (last && last.head === head) return skip('head unchanged');
+    if (!KEYPAIR) return skip('no WALLET_KEYPAIR set');
     const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(KEYPAIR, 'utf8'))));
     const conn = new Connection(RPC, 'confirmed');
     if (await conn.getBalance(kp.publicKey) < 10000) return otsAnchor(seq, head);

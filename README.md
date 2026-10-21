@@ -96,4 +96,15 @@ distinct claims, not repeats.
   end — receipts fixes *when* you claimed something, void is what happens when you
   check whether your instrument could have disagreed with you.
 
+## Run it yourself
+
+```
+npm install
+npm start          # listens on :3211 (PORT to change), data in ./data (RECEIPTS_DATA to change)
+npm test           # smoke test: log a claim, read it back, verify the chain, and confirm an edited claim fails
+```
+
+Solana anchoring only runs when `WALLET_KEYPAIR` points at a keypair file; without it the
+OpenTimestamps stamp and Bitcoin block-hash bracket still apply.
+
 Single-file Node server, no framework. MIT.
