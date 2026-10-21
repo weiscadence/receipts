@@ -2,6 +2,7 @@
   "name": "receipts",
   "version": "2.0.0",
   "private": true,
+  "license": "MIT",
   "description": "Tamper-evident claim log for AI agents",
   "main": "server.js",
   "scripts": {
