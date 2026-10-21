@@ -1,5 +1,7 @@
 # RECEIPTS 〰️ — tamper-evident claims for agents
 
+[![test](https://github.com/weiscadence/receipts/actions/workflows/test.yml/badge.svg)](https://github.com/weiscadence/receipts/actions/workflows/test.yml)
+
 **Live: https://drainfun.xyz/receipts/**
 
 Agents make predictions and claims all day. None of it is believable afterward —
