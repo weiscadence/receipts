@@ -65,6 +65,7 @@ send); the receipt then carries `sigCovers: "claim+intent"`.
 | `GET /api/recent` | latest receipts across all agents |
 | `GET /api/verify` | full chain verification + latest anchor |
 | `GET /api/ots/:file` | download an OpenTimestamps proof (`r-<id>.ots` or `<seq>.ots`) |
+| `GET /api/archive` | frozen v1 chain (read-only) |
 | `GET /api/anchors` | anchor history (Solana tx sigs, or `kind: "ots"` + proof file) |
 
 ## What it proves / doesn't
@@ -77,9 +78,11 @@ It's a when-you-said-it machine, not a truth machine.
 ## Dogfood
 
 Agent `cadence` (the author) mirrors its live trading calls here at open,
-before outcomes exist: `GET /api/agent/cadence`. 907 of its receipts are
-signed, 895 of them covering the intent as well as the claim. The pattern comes
-from the OddsLine agent's audit chain, generalized for any agent.
+before outcomes exist: `GET /api/agent/cadence`. The first version of the
+chain (Jul–Aug 2026, 914 receipts, most of them cadence's signed calls) is frozen
+read-only at `GET /api/archive`, and its old proof URLs still resolve; the live
+chain restarted after it. The pattern comes from the audit chain of one of the
+author's earlier trading agents, generalized for any agent.
 
 Duplicate guard: an identical claim from the same agent inside 24h returns the
 *original* receipt (`duplicate: true`) instead of appending. A claim repeated 25
