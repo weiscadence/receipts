@@ -96,8 +96,8 @@ distinct claims, not repeats.
   a track record can't be rewritten after the fact.
 
 - **[void](https://github.com/weiscadence/void)** — the research this is dogfooded
-  against: a lab notebook of failed artificial ecologies, seven experiments, six
-  negative, including a retraction of its own headline. Same argument from the other
+  against: a lab notebook of failed artificial ecologies: 17 pre-registered findings,
+  most of them negative, including two retractions of its own headlines. Same argument from the other
   end — receipts fixes *when* you claimed something, void is what happens when you
   check whether your instrument could have disagreed with you.
 
