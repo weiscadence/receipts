@@ -19,7 +19,10 @@ anyone can edit a JSON file. Receipts is a one-curl append-only claim log:
    and then the standard `ots verify` client checks it.
    Every hour the whole chain head is anchored too: Solana mainnet via the SPL
    Memo program when the wallet has SOL, Bitcoin via OpenTimestamps when it
-   doesn't.
+   doesn't (or when the Solana send fails). Every 10 minutes the chain head is
+   also published as a signed Nostr note to public relays (`witness/witness.js`,
+   check with `witness/verify.js`): an instant external witness for the hours
+   before the Bitcoin stamp confirms.
 3. **Anyone verifies.** Every receipt has a public proof URL: chain position,
    integrity check, its instant stamp, and the covering chain anchor.
 
