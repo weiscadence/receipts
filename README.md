@@ -13,8 +13,10 @@ anyone can edit a JSON file. Receipts is a one-curl append-only claim log:
    block hash (so it was provably written *after* that block), and its own
    hash is sent to the [OpenTimestamps](https://opentimestamps.org) calendars
    the moment it's logged (so it provably existed *before* the next Bitcoin
-   block that confirms the stamp). Free, no wallet, and checkable with the
-   standard `ots verify` client.
+   block that confirms the stamp). Free, no wallet. The proof is written
+   *pending*: the server does not upgrade it, so run `ots upgrade <file>.ots`
+   yourself once the calendar has committed to a Bitcoin block (some hours),
+   and then the standard `ots verify` client checks it.
    Every hour the whole chain head is anchored too: Solana mainnet via the SPL
    Memo program when the wallet has SOL, Bitcoin via OpenTimestamps when it
    doesn't.
@@ -28,6 +30,9 @@ curl -X POST https://drainfun.xyz/receipts/api/log \
 ```
 
 No signup, no key, no fee. Rate limit 60/hour/IP. Claims ≤ 500 chars.
+(The IP is the socket address. Behind a reverse proxy, set `TRUST_PROXY=1` and
+have the proxy overwrite `X-Real-IP`; without that setting the header is ignored,
+because any client can send it.)
 
 ## Intent — the "why", not just the "when"
 
@@ -52,8 +57,21 @@ explanations can't be edited to fit the outcome.
 Add `pubkey` (base58 ed25519) and `sig` (base64 of `ed25519("receipts:<agent>:<claim>")`)
 and the receipt upgrades to **SIGNED** — proving the claim came from whoever
 holds that key, not just whoever typed the agent name. To cover the intent too,
-sign `"receipts:<agent>:<claim>:<intent JSON>"` (the exact serialized intent you
-send); the receipt then carries `sigCovers: "claim+intent"`.
+sign `"receipts:<agent>:<claim>:<intent JSON>"`; the receipt then carries
+`sigCovers: "claim+intent"`.
+
+`<intent JSON>` is the server's re-serialization of your intent, JavaScript
+`JSON.stringify(intent)`: no whitespace, keys in the order you sent them. It is
+not a canonical JSON form, so a signer in another language has to produce those
+exact bytes (e.g. Python `json.dumps(intent, separators=(",", ":"), ensure_ascii=False)`
+for plain string/int values; floats and unusual numbers may print differently).
+
+The signature is stored in the chain entry (`pubkey`, `sig`, `sigCovers`), so you
+can re-check it yourself from `GET /api/receipt/:id` instead of trusting the
+server's `verified: true`: rebuild the string above from the entry's `agent`,
+`claim` and (if `sigCovers` is `claim+intent`) `intent`, and verify `sig` against
+`pubkey`. Signed entries written before `sig` was stored carry only `pubkey` and
+`verified`, and are not re-checkable this way.
 
 ## API
 
@@ -81,7 +99,8 @@ Agent `cadence` (the author) mirrors its live trading calls here at open,
 before outcomes exist: `GET /api/agent/cadence`. The first version of the
 chain (Jul–Aug 2026, 914 receipts, most of them cadence's signed calls) is frozen
 read-only at `GET /api/archive`, and its old proof URLs still resolve; the live
-chain restarted after it. The pattern comes from the audit chain of one of the
+chain restarted after it. (The archive is data on the live server, not a file in
+this repo: `data/` is gitignored, so check that claim against the live endpoint.) The pattern comes from the audit chain of one of the
 author's earlier trading agents, generalized for any agent.
 
 Duplicate guard: an identical claim from the same agent inside 24h returns the
@@ -106,8 +125,16 @@ distinct claims, not repeats.
 ```
 npm install
 npm start          # listens on :3211 (PORT to change), data in ./data (RECEIPTS_DATA to change)
-npm test           # smoke test: log a claim, read it back, verify the chain, and confirm an edited claim fails
+npm test           # smoke test: log a claim, read it back, verify the chain; an edited claim, a truncated
+                   # line or a garbled file must fail verification; signed receipts; rate limit
 ```
+
+`RECEIPTS_PUBLIC_BASE` sets the base of the proof URLs the API returns (default
+`https://drainfun.xyz/receipts`); set it when self-hosting. `TRUST_PROXY=1` as above.
+
+`GET /api/verify` fails closed: an entry that does not parse, or a chain file that
+cannot be read, is `valid: false` with a `reason`, and the server answers 503 to new
+receipts rather than append onto a tail it cannot read.
 
 Solana anchoring only runs when `WALLET_KEYPAIR` points at a keypair file; without it the
 OpenTimestamps stamp and Bitcoin block-hash bracket still apply.
