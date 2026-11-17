@@ -240,7 +240,8 @@ const clientIp = (req) => (TRUST_PROXY && req.headers['x-real-ip']) || req.socke
 
 // ── http ──────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  // Host is client-controlled; a malformed one made new URL() throw and crash the process.
+  const url = new URL(req.url, 'http://localhost');
   const json = (obj, code = 200) => {
     res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(obj, null, 2));
