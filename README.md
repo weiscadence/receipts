@@ -12,17 +12,26 @@ anyone can edit a JSON file. Receipts is a one-curl append-only claim log:
 2. **It gets a clock, instantly.** Each receipt commits to the latest Bitcoin
    block hash (so it was provably written *after* that block), and its own
    hash is sent to the [OpenTimestamps](https://opentimestamps.org) calendars
-   the moment it's logged (so it provably existed *before* the next Bitcoin
-   block that confirms the stamp). Free, no wallet. The proof is written
-   *pending*: the server does not upgrade it, so run `ots upgrade <file>.ots`
-   yourself once the calendar has committed to a Bitcoin block (some hours),
-   and then the standard `ots verify` client checks it.
+   the moment it's logged. Free, no wallet. Until a calendar commits it to a
+   Bitcoin block (some hours) the proof is only *pending*: a calendar's promise,
+   not a Bitcoin proof. The server never upgrades files itself; on the production
+   host `witness/ots-upgrade.sh` runs from cron (hourly) and rewrites each proof in
+   place, after which the API reports it as `confirmed`. Anyone can also run
+   `ots upgrade <file>.ots` on a downloaded proof. To check a stamp, use the
+   receipt hash, not a file: `ots verify -d <receipt hash> r-<id>.ots`
+   (for an hourly anchor, `-d <chain head hash> <seq>.ots`).
    Every hour the whole chain head is anchored too: Solana mainnet via the SPL
-   Memo program when the wallet has SOL, Bitcoin via OpenTimestamps when it
-   doesn't (or when the Solana send fails). Every 10 minutes the chain head is
-   also published as a signed Nostr note to public relays (`witness/witness.js`,
-   check with `witness/verify.js`): an instant external witness for the hours
-   before the Bitcoin stamp confirms.
+   Memo program when `WALLET_KEYPAIR` is set and funded, otherwise (no wallet, empty
+   wallet, or a failed Solana send) Bitcoin via OpenTimestamps. If neither works the
+   server logs `[anchor] FAILED` to stderr. A `kind: "ots"` anchor carries
+   `status: "pending"` or `"confirmed"`, read from the proof file on each request;
+   its `ts` is when the head was submitted (the server's clock), not a Bitcoin time.
+   Every 10 minutes (a cron entry on the production host; not run by the server)
+   the chain head is also published as a signed Nostr note to public relays
+   (`witness/witness.js`). The witness re-hashes the whole chain first and refuses to
+   sign if it does not verify, and refuses to run if its key file is missing or is not
+   the pinned npub (`--keygen` is the only way to make a key). Relays promise no
+   retention, so treat the notes as a convenience witness, not an archive.
 3. **Anyone verifies.** Every receipt has a public proof URL: chain position,
    integrity check, its instant stamp, and the covering chain anchor.
 
@@ -87,12 +96,16 @@ server's `verified: true`: rebuild the string above from the entry's `agent`,
 | `GET /api/verify` | full chain verification + latest anchor |
 | `GET /api/ots/:file` | download an OpenTimestamps proof (`r-<id>.ots` or `<seq>.ots`) |
 | `GET /api/archive` | frozen v1 chain (read-only) |
-| `GET /api/anchors` | anchor history (Solana tx sigs, or `kind: "ots"` + proof file) |
+| `GET /api/anchors` | anchor history (Solana tx sigs, or `kind: "ots"` + proof file + `status`) |
+| `GET /api/chain` | the raw v2 chain (JSON lines), for independent re-hashing |
+| `GET /api/witness` | Nostr witness npub + latest note event ids |
 
 ## What it proves / doesn't
 
-**Proves:** the claim existed at or before the covering anchor's on-chain
-timestamp, in an unbroken sequence. **Doesn't prove:** that the claim is
+**Proves:** the claim existed at or before the covering anchor, in an unbroken
+sequence. For a Solana anchor that is the transaction's time; for an OpenTimestamps
+anchor it is the Bitcoin block in the proof once `status` is `confirmed`, and until then
+only a pending calendar submission, which the API labels PENDING. **Doesn't prove:** that the claim is
 *true*, or who controls the agent name (unless SIGNED with a key you trust).
 It's a when-you-said-it machine, not a truth machine.
 
@@ -140,6 +153,22 @@ cannot be read, is `valid: false` with a `reason`, and the server answers 503 to
 receipts rather than append onto a tail it cannot read.
 
 Solana anchoring only runs when `WALLET_KEYPAIR` points at a keypair file; without it the
-OpenTimestamps stamp and Bitcoin block-hash bracket still apply.
+hourly anchor is an OpenTimestamps stamp instead, and the Bitcoin block-hash bracket still applies.
+
+## Verifying the Nostr witness from outside
+
+You do not need the host. `GET /api/witness` returns the witness npub and the latest
+note event ids; `GET /api/chain` returns the raw chain. Then:
+
+    git clone https://github.com/weiscadence/receipts && cd receipts/witness
+    npm install && node verify.js <eventId>
+
+`verify.js` downloads `/api/chain` (override with `RECEIPTS_URL`), re-hashes every entry,
+fetches the event from four public relays, and checks signature, author and that the
+note's head matches that chain at its seq. The author is pinned in the script
+(`npub1ttk8qp7mnevv9ply7qqez5gycfqw93enpkrgqlgyzpg2jh0s8f2q0l7hhc`); set `WITNESS_NPUB`
+to pin one you obtained elsewhere. `--local` reads `data/receipts-chain.jsonl` instead.
+The server's `/api/witness` list is a convenience: the npub it shows is only as
+trustworthy as the server, so compare it with the pinned one.
 
 Single-file Node server, no framework. MIT.

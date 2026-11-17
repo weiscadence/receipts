@@ -9,6 +9,7 @@ const WebSocket = require('ws');
 const { generateSecretKey, getPublicKey, finalizeEvent, nip19 } = require('nostr-tools');
 const { Relay, useWebSocketImplementation } = require('nostr-tools/relay');
 useWebSocketImplementation(WebSocket);
+const { PINNED_NPUB, verifyChainText, readKeyHex } = require('./chain');
 
 const ROOT = path.join(__dirname, '..');
 const CHAIN = path.join(ROOT, 'data', 'receipts-chain.jsonl');
@@ -17,20 +18,24 @@ const KEYFILE = process.env.WITNESS_KEY || path.join(os.homedir(), '.config', 'r
 const RELAYS = ['wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.snort.social', 'wss://relay.damus.io'];
 const hex = u => Buffer.from(u).toString('hex');
 
-function loadKey() {
-  if (!fs.existsSync(KEYFILE)) {
+// Only --keygen may create a key. Anything else with a missing keyfile is an error.
+function loadKey(create) {
+  if (!fs.existsSync(KEYFILE) && create) {
     fs.mkdirSync(path.dirname(KEYFILE), { recursive: true, mode: 0o700 });
     fs.writeFileSync(KEYFILE, hex(generateSecretKey()) + '\n', { mode: 0o600 });
     console.log('generated new key at', KEYFILE);
   }
+  const keyHex = readKeyHex(KEYFILE);
   fs.chmodSync(KEYFILE, 0o600);
-  return Uint8Array.from(Buffer.from(fs.readFileSync(KEYFILE, 'utf8').trim(), 'hex'));
+  return Uint8Array.from(Buffer.from(keyHex, 'hex'));
 }
 
+// Never witness a chain that does not verify: a signed head would lend a rewritten chain credibility.
 function head() {
-  const lines = fs.readFileSync(CHAIN, 'utf8').trim().split('\n');
-  const last = JSON.parse(lines[lines.length - 1]);
-  return { hash: last.hash, seq: last.seq, entryTs: last.ts, length: lines.length };
+  const text = fs.readFileSync(CHAIN, 'utf8');
+  const v = verifyChainText(text);
+  if (!v.valid) throw new Error(`chain does not verify (${v.reason} at entry ${v.brokenAt}); refusing to witness it`);
+  return { hash: v.head, seq: v.seq, entryTs: JSON.parse(text.trim().split('\n').pop()).ts, length: v.entries };
 }
 
 function lastLogged() {
@@ -53,9 +58,13 @@ async function publishTo(url, ev) {
 }
 
 async function main() {
-  const sk = loadKey();
+  const keygen = process.argv.includes('--keygen');
+  const sk = loadKey(keygen);
   const pk = getPublicKey(sk);
-  if (process.argv.includes('--keygen')) { console.log('npub', nip19.npubEncode(pk)); return; }
+  const npub = nip19.npubEncode(pk);
+  if (keygen) { console.log('npub', npub); return; }
+  const expected = process.env.WITNESS_NPUB || PINNED_NPUB;
+  if (npub !== expected) throw new Error(`key ${KEYFILE} is ${npub}, expected ${expected}; refusing to sign (set WITNESS_NPUB to rotate on purpose)`);
   const h = head();
   const prev = lastLogged();
   if (!process.argv.includes('--force') && prev && prev.head === h.hash) return; // unchanged

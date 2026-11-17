@@ -7,7 +7,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node smoke.test.js"
+    "test": "node smoke.test.js && node anchor-status.test.js && node witness/chain.test.js"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.0",
