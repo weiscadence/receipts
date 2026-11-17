@@ -149,11 +149,12 @@ function latestAnchor() {
 
 // ── anchor on Solana ──────────────────────────────────────────────
 async function anchor() {
+  let seq, head;
   try {
     const { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, sendAndConfirmTransaction } =
       dep('@solana/web3.js');
     const skip = (reason) => { console.log(`[anchor] skipped: ${reason}`); return { anchored: false, reason }; };
-    const { head, seq } = chainTail();
+    ({ head, seq } = chainTail());
     if (head === GEN) return skip('empty chain');
     const last = latestAnchor();
     if (last && last.head === head) return skip('head unchanged');
@@ -172,6 +173,8 @@ async function anchor() {
     return { anchored: true, ...rec };
   } catch (e) {
     console.log('[anchor] failed:', e.message);
+    // A balance above the fee but below rent-exempt fails simulation; don't go dark, use the free path.
+    if (head && head !== GEN) return otsAnchor(seq, head);
     return { anchored: false, reason: e.message };
   }
 }
