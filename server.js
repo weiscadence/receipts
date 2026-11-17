@@ -42,6 +42,8 @@ const GEN = V1_HEAD ? `v1:${V1_HEAD}` : 'GENESIS';
 const KEYPAIR = process.env.WALLET_KEYPAIR; // unset = Solana anchoring skipped (OTS + BTC bracket still run)
 const RPC = process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 const PORT = +process.env.PORT || 3211;
+// Public base of this deployment, used in the proof URLs handed back to callers.
+const PUBLIC_BASE = (process.env.RECEIPTS_PUBLIC_BASE || 'https://drainfun.xyz/receipts').replace(/\/+$/, '');
 const ANCHOR_EVERY_MS = 3600 * 1000; // hourly chain-head anchor (OTS is free, so no reason to wait 6h)
 
 const MAX_CLAIM = 500;
@@ -55,11 +57,16 @@ fs.mkdirSync(DATA, { recursive: true });
 let seqCache = null, headCache = null;
 function chainTail() {
   if (headCache !== null) return { head: headCache, seq: seqCache };
-  try {
-    const lines = fs.readFileSync(CHAIN, 'utf8').trim().split('\n');
-    const last = JSON.parse(lines[lines.length - 1]);
-    headCache = last.hash; seqCache = last.seq;
-  } catch { headCache = GEN; seqCache = -1; }
+  // Only a missing or empty file is an empty chain. An unreadable file or a garbled
+  // last line throws: restarting from genesis there would silently fork the chain.
+  let text = '';
+  try { text = fs.readFileSync(CHAIN, 'utf8').trim(); }
+  catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (!text) { headCache = GEN; seqCache = -1; return { head: headCache, seq: seqCache }; }
+  const lines = text.split('\n');
+  const last = JSON.parse(lines[lines.length - 1]);
+  if (typeof last.hash !== 'string' || !Number.isInteger(last.seq)) throw new Error('chain tail has no hash/seq');
+  headCache = last.hash; seqCache = last.seq;
   return { head: headCache, seq: seqCache };
 }
 
@@ -67,26 +74,38 @@ function chainTail() {
 // Each receipt commits to the latest Bitcoin block hash it saw. Nobody can know
 // a block hash before the block is mined, so the receipt provably was written
 // AFTER that block. The OTS stamp below bounds it from the other side (BEFORE).
-let btcTip = null;
+let btcTip = null, btcTipAt = 0;
 async function refreshBtcTip() {
   try {
+    // height is read from the block the hash names, so the pair always describes one block
     const r = await fetch('https://mempool.space/api/blocks/tip/hash', { signal: AbortSignal.timeout(8000) });
-    const h = await fetch('https://mempool.space/api/blocks/tip/height', { signal: AbortSignal.timeout(8000) });
-    if (r.ok && h.ok) btcTip = { btcHash: (await r.text()).trim(), btcHeight: +(await h.text()) };
+    if (!r.ok) return;
+    const btcHash = (await r.text()).trim();
+    if (!/^[0-9a-f]{64}$/.test(btcHash)) return;
+    const b = await fetch(`https://mempool.space/api/block/${btcHash}`, { signal: AbortSignal.timeout(8000) });
+    if (!b.ok) return;
+    const { id, height } = await b.json();
+    if (id !== btcHash || !Number.isInteger(height)) return;
+    btcTip = { btcHash, btcHeight: height }; btcTipAt = Date.now();
   } catch {}
 }
+// A tip we could not refresh is dropped rather than stamped onto new receipts as "latest".
+const BTC_TIP_MAX_AGE_MS = 30 * 60 * 1000;
+const freshBtcTip = () => (btcTip && Date.now() - btcTipAt < BTC_TIP_MAX_AGE_MS ? btcTip : null);
 refreshBtcTip(); setInterval(refreshBtcTip, 60 * 1000);
 
-function appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers }) {
+function appendReceipt({ agent, claim, intent, pubkey, sig, verified, sigCovers }) {
   const { head, seq } = chainTail();
+  const tip = freshBtcTip();
   const body = {
     seq: seq + 1,
     id: crypto.randomBytes(8).toString('hex'),
     ts: Date.now(),
     agent, claim,
     ...(intent ? { intent } : {}),
-    ...(pubkey ? { pubkey, verified, sigCovers } : {}),
-    ...(btcTip ? { after: btcTip } : {}),
+    // sig is stored so anyone can re-check it against pubkey; `verified` alone is only our word
+    ...(pubkey ? { pubkey, sig, verified, sigCovers } : {}),
+    ...(tip ? { after: tip } : {}),
     prev: head,
   };
   const hash = crypto.createHash('sha256').update(head + JSON.stringify(body)).digest('hex');
@@ -102,15 +121,22 @@ function readChain(file = CHAIN) {
 }
 
 function verifyChain(file = CHAIN, genesis = GEN) {
-  let prev = genesis, n = 0;
-  try {
-    for (const line of fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean)) {
-      const { hash, ...body } = JSON.parse(line);
-      const expect = crypto.createHash('sha256').update(prev + JSON.stringify(body)).digest('hex');
-      if (expect !== hash || body.prev !== prev) return { valid: false, brokenAt: n };
-      prev = hash; n++;
-    }
-  } catch {}
+  let prev = genesis, n = 0, text = '';
+  // A chain file that does not exist yet is an empty, valid chain. Anything else we
+  // cannot read or parse is reported as invalid, never as a shorter valid chain.
+  try { text = fs.readFileSync(file, 'utf8'); }
+  catch (e) {
+    if (e.code !== 'ENOENT') return { valid: false, brokenAt: 0, reason: `chain unreadable: ${e.code || e.message}` };
+  }
+  for (const line of text.trim().split('\n').filter(Boolean)) {
+    let entry;
+    try { entry = JSON.parse(line); } catch { return { valid: false, brokenAt: n, reason: 'unparseable entry' }; }
+    if (entry === null || typeof entry !== 'object') return { valid: false, brokenAt: n, reason: 'unparseable entry' };
+    const { hash, ...body } = entry;
+    const expect = crypto.createHash('sha256').update(prev + JSON.stringify(body)).digest('hex');
+    if (expect !== hash || body.prev !== prev) return { valid: false, brokenAt: n, reason: 'hash mismatch' };
+    prev = hash; n++;
+  }
   return { valid: true, entries: n, head: prev };
 }
 
@@ -123,11 +149,12 @@ function latestAnchor() {
 
 // ── anchor on Solana ──────────────────────────────────────────────
 async function anchor() {
+  let seq, head;
   try {
     const { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, sendAndConfirmTransaction } =
       dep('@solana/web3.js');
     const skip = (reason) => { console.log(`[anchor] skipped: ${reason}`); return { anchored: false, reason }; };
-    const { head, seq } = chainTail();
+    ({ head, seq } = chainTail());
     if (head === GEN) return skip('empty chain');
     const last = latestAnchor();
     if (last && last.head === head) return skip('head unchanged');
@@ -146,6 +173,8 @@ async function anchor() {
     return { anchored: true, ...rec };
   } catch (e) {
     console.log('[anchor] failed:', e.message);
+    // A balance above the fee but below rent-exempt fails simulation; don't go dark, use the free path.
+    if (head && head !== GEN) return otsAnchor(seq, head);
     return { anchored: false, reason: e.message };
   }
 }
@@ -169,7 +198,7 @@ async function otsStamp(hexDigest, name, timeoutMs = 20000) {
       const magic = Buffer.from('004f70656e54696d657374616d7073000050726f6f6600bf89e2e884e89294', 'hex');
       fs.mkdirSync(OTS_DIR, { recursive: true });
       fs.writeFileSync(path.join(OTS_DIR, name), Buffer.concat([magic, Buffer.from([0x01, 0x08]), digest, pending]));
-      return { calendar: cal, proof: `https://drainfun.xyz/receipts/api/ots/${name}` };
+      return { calendar: cal, proof: `${PUBLIC_BASE}/api/ots/${name}` };
     } catch (e) { console.log(`[ots] ${cal} failed:`, e.message); }
   }
   return null;
@@ -193,17 +222,29 @@ function checkSig(agent, claim, pubkey, sig) {
 }
 
 // ── rate limit: 60 writes/hour per IP ─────────────────────────────
+const RATE_WINDOW_MS = 3600000;
 const buckets = new Map();
 function limited(ip) {
   const now = Date.now(), b = buckets.get(ip) || [];
-  const fresh = b.filter(t => now - t < 3600000);
+  const fresh = b.filter(t => now - t < RATE_WINDOW_MS);
   if (fresh.length >= 60) { buckets.set(ip, fresh); return true; }
   fresh.push(now); buckets.set(ip, fresh); return false;
 }
+// Drop buckets whose newest write has aged out, so the map is bounded by the IPs
+// seen in the last window rather than every IP ever seen.
+function sweepBuckets(now = Date.now()) {
+  for (const [ip, b] of buckets) if (!b.length || now - b[b.length - 1] >= RATE_WINDOW_MS) buckets.delete(ip);
+}
+setInterval(sweepBuckets, 10 * 60 * 1000).unref();
+// X-Real-IP is whatever the client sends unless a reverse proxy overwrites it, so it is
+// only honoured when TRUST_PROXY=1 says such a proxy is in front. Otherwise: the socket.
+const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || '');
+const clientIp = (req) => (TRUST_PROXY && req.headers['x-real-ip']) || req.socket.remoteAddress;
 
 // ── http ──────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  // Host is client-controlled; a malformed one made new URL() throw and crash the process.
+  const url = new URL(req.url, 'http://localhost');
   const json = (obj, code = 200) => {
     res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(obj, null, 2));
@@ -215,8 +256,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/log') {
-    const ip = req.headers['x-real-ip'] || req.socket.remoteAddress;
-    if (limited(ip)) return json({ error: 'rate limited: 60 receipts/hour' }, 429);
+    if (limited(clientIp(req))) return json({ error: 'rate limited: 60 receipts/hour' }, 429);
     let raw = '';
     req.on('data', c => { raw += c; if (raw.length > 4096) req.destroy(); });
     req.on('end', () => {
@@ -251,17 +291,17 @@ const server = http.createServer((req, res) => {
           if (e.agent === agent && e.claim === claim) {
             return json({
               ok: true, duplicate: true, receipt: e,
-              verify: `https://drainfun.xyz/receipts/api/receipt/${e.id}`,
+              verify: `${PUBLIC_BASE}/api/receipt/${e.id}`,
               note: `identical claim already logged by this agent within ${DEDUPE_WINDOW_HOURS}h; returning the original receipt`,
             });
           }
         }
       }
 
-      let pubkey = null, verified = false, sigCovers = null;
+      let pubkey = null, sig = null, verified = false, sigCovers = null;
       if (b.pubkey && b.sig) {
         pubkey = String(b.pubkey);
-        const sig = String(b.sig);
+        sig = String(b.sig);
         // sig over claim+intent proves the rationale, not just the claim;
         // plain claim sig still accepted so existing clients don't break
         if (intent && checkSig(agent, `${claim}:${JSON.stringify(intent)}`, pubkey, sig)) {
@@ -271,13 +311,18 @@ const server = http.createServer((req, res) => {
         }
         if (!verified) return json({ error: 'signature verification failed (sign "receipts:<agent>:<claim>" — or "receipts:<agent>:<claim>:<intent JSON>" to cover intent — ed25519, sig base64, pubkey base58)' }, 400);
       }
-      const entry = appendReceipt({ agent, claim, intent, pubkey, verified, sigCovers });
+      let entry;
+      try { entry = appendReceipt({ agent, claim, intent, pubkey, sig, verified, sigCovers }); }
+      catch (e) {
+        console.log('[log] refused, chain tail unreadable:', e.message);
+        return json({ error: 'chain tail unreadable; refusing to append (see /api/verify)' }, 503);
+      }
       // instant stamp: this receipt's own hash goes to the OTS calendars right now
       // (calendar-attested in ~1s, Bitcoin-confirmed within hours). The chain is
       // also anchored hourly; this just closes the gap for each claim.
       otsStamp(entry.hash, `r-${entry.id}.ots`, 5000).then(stamp => json({
         ok: true, receipt: entry, stamp: stamp || 'calendar unreachable; covered by next hourly anchor',
-        verify: `https://drainfun.xyz/receipts/api/receipt/${entry.id}`,
+        verify: `${PUBLIC_BASE}/api/receipt/${entry.id}`,
       }));
     });
     return;
@@ -311,7 +356,7 @@ const server = http.createServer((req, res) => {
       chainHead: v.head,
       coveringAnchor,
       instantStamp: fs.existsSync(path.join(OTS_DIR, `r-${chain[i].id}.ots`))
-        ? `https://drainfun.xyz/receipts/api/ots/r-${chain[i].id}.ots` : null,
+        ? `${PUBLIC_BASE}/api/ots/r-${chain[i].id}.ots` : null,
       after: chain[i].after
         ? `written after Bitcoin block ${chain[i].after.btcHeight} (${chain[i].after.btcHash})` : null,
       proves: coveringAnchor
