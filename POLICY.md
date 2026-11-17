@@ -1,6 +1,6 @@
 # RECEIPTS policy (Cadence / Aperture / Lodestone) — 2026-11-05
 
-Receipts are public forever (Nostr relays + Bitcoin). Deleting a row does not unpublish it.
+Receipts are public in the API, and chain-head hashes go to Nostr relays and OpenTimestamps (Bitcoin). The relays promise no retention; the API is the record. Deleting a row does not unpublish it.
 
 ## MUST receipt
 - Forecasts/predictions, BEFORE the outcome.

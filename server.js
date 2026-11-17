@@ -3,7 +3,8 @@
 // The problem: agents make predictions and claims all day, and none of it is
 // believable after the fact — anyone can edit a JSON file. Receipts gives any
 // agent a one-curl append-only log: every claim is hash-chained the moment it
-// arrives, the chain head is anchored on Solana (Memo program) on a timer, and
+// arrives, the chain head is anchored hourly (Solana Memo program when a wallet is
+// funded, otherwise OpenTimestamps/Bitcoin), and
 // anyone can verify an agent said X before Y happened.
 //
 // What a receipt proves: the claim existed at (or before) the anchor time,
@@ -30,6 +31,7 @@ const bs58 = dep('bs58').default || dep('bs58');
 const DATA = process.env.RECEIPTS_DATA || path.join(__dirname, 'data');
 const CHAIN = path.join(DATA, 'receipts-chain.jsonl');
 const ANCHORS = path.join(DATA, 'anchors.jsonl');
+const WITNESS_LOG = path.join(DATA, 'witness-log.jsonl');
 // ── epochs ──
 // v1 (Jul–Aug 2026, 914 receipts, Solana-anchored) is frozen read-only in data/archive/.
 // v2's first entry chains onto v1's final head, so the fresh start is provably a
@@ -39,11 +41,12 @@ const V1_CHAIN = path.join(ARCH, 'v1-chain.jsonl');
 const V1_ANCHORS = path.join(ARCH, 'v1-anchors.jsonl');
 const V1_HEAD = (() => { try { const l = fs.readFileSync(V1_CHAIN, 'utf8').trim().split('\n'); return JSON.parse(l[l.length - 1]).hash; } catch { return null; } })();
 const GEN = V1_HEAD ? `v1:${V1_HEAD}` : 'GENESIS';
-const KEYPAIR = process.env.WALLET_KEYPAIR; // unset = Solana anchoring skipped (OTS + BTC bracket still run)
+const KEYPAIR = process.env.WALLET_KEYPAIR; // unset = hourly anchor goes to OpenTimestamps instead of Solana
 const RPC = process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 const PORT = +process.env.PORT || 3211;
 // Public base of this deployment, used in the proof URLs handed back to callers.
 const PUBLIC_BASE = (process.env.RECEIPTS_PUBLIC_BASE || 'https://drainfun.xyz/receipts').replace(/\/+$/, '');
+const FIRST_ANCHOR_MS = +process.env.RECEIPTS_FIRST_ANCHOR_MS || 60 * 1000;
 const ANCHOR_EVERY_MS = 3600 * 1000; // hourly chain-head anchor (OTS is free, so no reason to wait 6h)
 
 const MAX_CLAIM = 500;
@@ -158,7 +161,8 @@ async function anchor() {
     if (head === GEN) return skip('empty chain');
     const last = latestAnchor();
     if (last && last.head === head) return skip('head unchanged');
-    if (!KEYPAIR) return skip('no WALLET_KEYPAIR set');
+    // No wallet is not a reason to go dark: the free OTS path anchors the head anyway.
+    if (!KEYPAIR) return otsAnchor(seq, head);
     const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(KEYPAIR, 'utf8'))));
     const conn = new Connection(RPC, 'confirmed');
     if (await conn.getBalance(kp.publicKey) < 10000) return otsAnchor(seq, head);
@@ -184,7 +188,19 @@ async function anchor() {
 // is "pending" until a calendar commits it to a Bitcoin block (~hours); run
 // `ots upgrade data/ots/<seq>.ots` later to get the full Bitcoin attestation.
 const OTS_DIR = path.join(DATA, 'ots');
-const OTS_CALENDARS = ['https://a.pool.opentimestamps.org', 'https://b.pool.opentimestamps.org'];
+const OTS_CALENDARS = process.env.RECEIPTS_OTS_CALENDARS
+  ? process.env.RECEIPTS_OTS_CALENDARS.split(',').map(s => s.trim()).filter(Boolean)
+  : ['https://a.pool.opentimestamps.org', 'https://b.pool.opentimestamps.org'];
+// An OTS file is pending until a calendar commits it to Bitcoin; `ots upgrade` (witness/ots-upgrade.sh,
+// run from cron on the host) then rewrites it in place with a Bitcoin block attestation. Read the
+// file, not our own records, so the status is whatever the file proves right now.
+const OTS_BITCOIN_TAG = Buffer.from('0588960d73d71901', 'hex'); // BitcoinBlockHeaderAttestation
+function otsStatus(file) {
+  try { return fs.readFileSync(path.join(OTS_DIR, file)).includes(OTS_BITCOIN_TAG) ? 'confirmed' : 'pending'; }
+  catch { return null; }
+}
+const withStatus = (a) => (a && a.kind === 'ots' && typeof a.proof === 'string'
+  ? { ...a, status: otsStatus(path.basename(a.proof)) || 'missing' } : a);
 async function otsStamp(hexDigest, name, timeoutMs = 20000) {
   const digest = Buffer.from(hexDigest, 'hex');
   for (const cal of OTS_CALENDARS) {
@@ -198,7 +214,7 @@ async function otsStamp(hexDigest, name, timeoutMs = 20000) {
       const magic = Buffer.from('004f70656e54696d657374616d7073000050726f6f6600bf89e2e884e89294', 'hex');
       fs.mkdirSync(OTS_DIR, { recursive: true });
       fs.writeFileSync(path.join(OTS_DIR, name), Buffer.concat([magic, Buffer.from([0x01, 0x08]), digest, pending]));
-      return { calendar: cal, proof: `${PUBLIC_BASE}/api/ots/${name}` };
+      return { calendar: cal, proof: `${PUBLIC_BASE}/api/ots/${name}`, status: 'pending' };
     } catch (e) { console.log(`[ots] ${cal} failed:`, e.message); }
   }
   return null;
@@ -206,8 +222,9 @@ async function otsStamp(hexDigest, name, timeoutMs = 20000) {
 
 async function otsAnchor(seq, head) {
   const stamp = await otsStamp(head, `${seq}.ots`);
-  if (!stamp) { console.log('[anchor] skipped: wallet unfunded and no OTS calendar reachable'); return { anchored: false, reason: 'wallet unfunded; OTS unreachable' }; }
-  const rec = { ts: Date.now(), seq, head, kind: 'ots', ...stamp };
+  if (!stamp) { console.error(`[anchor] FAILED: seq ${seq} not anchored anywhere: no funded wallet and no OTS calendar reachable`); return { anchored: false, reason: 'no funded wallet; OTS unreachable' }; }
+  // ts is when we SUBMITTED the head (our clock), not a Bitcoin time. See status for what the proof shows.
+  const rec = { ts: Date.now(), seq, head, kind: 'ots', status: 'pending', ...stamp };
   fs.appendFileSync(ANCHORS, JSON.stringify(rec) + '\n');
   console.log(`[anchor] seq ${seq} head ${head.slice(0, 12)}… OTS via ${stamp.calendar}`);
   return { anchored: true, ...rec };
@@ -338,7 +355,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/verify') {
-    return json({ ...verifyChain(), genesis: GEN, latestAnchor: latestAnchor() });
+    return json({ ...verifyChain(), genesis: GEN, latestAnchor: withStatus(latestAnchor()) });
   }
 
   if (url.pathname.startsWith('/api/receipt/')) {
@@ -349,18 +366,23 @@ const server = http.createServer((req, res) => {
     if (i === -1) return json({ error: 'not found' }, 404);
     const v = epoch === 'v1' ? verifyChain(V1_CHAIN, 'GENESIS') : verifyChain();
     const anchors = (() => { try { return fs.readFileSync(epoch === 'v1' ? V1_ANCHORS : ANCHORS, 'utf8').trim().split('\n').map(l => JSON.parse(l)); } catch { return []; } })();
-    const coveringAnchor = anchors.find(a => a.seq >= chain[i].seq) || null;
+    const coveringAnchor = withStatus(anchors.find(a => a.seq >= chain[i].seq) || null);
     return json({
       receipt: chain[i], epoch,
       chainValid: v.valid,
       chainHead: v.head,
       coveringAnchor,
+      instantStatus: otsStatus(`r-${chain[i].id}.ots`),
       instantStamp: fs.existsSync(path.join(OTS_DIR, `r-${chain[i].id}.ots`))
         ? `${PUBLIC_BASE}/api/ots/r-${chain[i].id}.ots` : null,
       after: chain[i].after
         ? `written after Bitcoin block ${chain[i].after.btcHeight} (${chain[i].after.btcHash})` : null,
       proves: coveringAnchor
-        ? `this claim existed at or before ${new Date(coveringAnchor.ts).toISOString()} (${coveringAnchor.kind === 'ots' ? `Bitcoin via OpenTimestamps, proof ${coveringAnchor.proof}` : `Solana tx ${coveringAnchor.txSig}`})`
+        ? (coveringAnchor.kind !== 'ots'
+          ? `this claim existed at or before ${new Date(coveringAnchor.ts).toISOString()} (Solana tx ${coveringAnchor.txSig})`
+          : coveringAnchor.status === 'confirmed'
+            ? `this claim existed at or before the Bitcoin block attested in ${coveringAnchor.proof} (verify with: ots verify -d <chain head hash> <proof>); anchor submitted ${new Date(coveringAnchor.ts).toISOString()}`
+            : `PENDING: the chain head was submitted to OpenTimestamps calendars at ${new Date(coveringAnchor.ts).toISOString()} (server clock); it is not yet in a Bitcoin block, so this is not a Bitcoin proof yet. Proof: ${coveringAnchor.proof}`)
         : 'claim is chained but not yet covered by a chain anchor (next anchor within 1h); see instantStamp',
     });
   }
@@ -392,8 +414,28 @@ const server = http.createServer((req, res) => {
     return json({ total: chain.length, agents: new Set(chain.map(e => e.agent)).size, entries: chain.slice(-Math.min(+url.searchParams.get('n') || 30, 100)).reverse() });
   }
 
+  // The whole v2 chain, raw, so a third party can re-hash it (witness/verify.js does).
+  if (url.pathname === '/api/chain') {
+    try {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      return res.end(fs.readFileSync(CHAIN));
+    } catch { return json({ error: 'chain unreadable' }, 503); }
+  }
+
+  // Nostr witness: who signs the chain-head notes and which events to check. Public by design;
+  // the log is written by witness/witness.js. Verify with: node witness/verify.js <eventId>.
+  if (url.pathname === '/api/witness') {
+    const events = readChain(WITNESS_LOG).reverse().slice(0, 20)
+      .map(({ ts, seq, head, eventId, npub, acked }) => ({ ts, seq, head, eventId, npub, relays: acked }));
+    return json({
+      npub: events[0]?.npub || null, events,
+      verify: 'git clone https://github.com/weiscadence/receipts && cd receipts/witness && npm install && node verify.js <eventId>',
+      note: 'verify.js downloads /api/chain, re-hashes it, and checks the Nostr event signature, author and head against it',
+    });
+  }
+
   if (url.pathname === '/api/anchors') {
-    try { return json(fs.readFileSync(ANCHORS, 'utf8').trim().split('\n').map(l => JSON.parse(l)).reverse()); }
+    try { return json(fs.readFileSync(ANCHORS, 'utf8').trim().split('\n').map(l => withStatus(JSON.parse(l))).reverse()); }
     catch { return json([]); }
   }
 
@@ -422,4 +464,4 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => console.log(`[receipts] listening on :${PORT}`));
 setInterval(anchor, ANCHOR_EVERY_MS);
-setTimeout(anchor, 60 * 1000); // first anchor a minute after boot (if chain non-empty)
+setTimeout(anchor, FIRST_ANCHOR_MS); // first anchor a minute after boot (if chain non-empty)

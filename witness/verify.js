@@ -1,4 +1,8 @@
-// node verify.js <eventId> : fetch event back from each relay by id, check sig, author, and head against the local chain
+// node verify.js <eventId> : fetch event back from each relay by id, check sig, author, and head against the chain.
+// The chain is downloaded from the public API (RECEIPTS_URL, default https://drainfun.xyz/receipts) and re-hashed
+// locally, so anyone can run this. --local reads data/receipts-chain.jsonl instead (the host's own check).
+// Find event ids at GET <RECEIPTS_URL>/api/witness. Pin the npub you trust with WITNESS_NPUB if you do not
+// want to rely on the one below.
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
@@ -6,14 +10,22 @@ const { Relay, useWebSocketImplementation } = require('nostr-tools/relay');
 const { verifyEvent, nip19 } = require('nostr-tools');
 useWebSocketImplementation(WebSocket);
 
-const OUR_NPUB = 'npub1ttk8qp7mnevv9ply7qqez5gycfqw93enpkrgqlgyzpg2jh0s8f2q0l7hhc';
-const OUR_PK = nip19.decode(OUR_NPUB).data;
-const chain = fs.readFileSync(path.join(__dirname, '..', 'data', 'receipts-chain.jsonl'), 'utf8')
-  .split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-const bySeq = new Map(chain.map(e => [String(e.seq), e.hash]));
+const { PINNED_NPUB, verifyChainText } = require('./chain');
 
-const id = process.argv[2];
-if (!id) { console.error('usage: node verify.js <eventId>'); process.exit(2); }
+const OUR_NPUB = process.env.WITNESS_NPUB || PINNED_NPUB;
+const OUR_PK = nip19.decode(OUR_NPUB).data;
+const BASE = (process.env.RECEIPTS_URL || 'https://drainfun.xyz/receipts').replace(/\/+$/, '');
+
+async function loadChainText() {
+  if (process.argv.includes('--local')) return fs.readFileSync(path.join(__dirname, '..', 'data', 'receipts-chain.jsonl'), 'utf8');
+  const r = await fetch(`${BASE}/api/chain`, { signal: AbortSignal.timeout(30000) });
+  if (!r.ok) throw new Error(`GET ${BASE}/api/chain -> ${r.status}`);
+  return r.text();
+}
+
+const id = process.argv.slice(2).find(a => !a.startsWith('--'));
+if (!id) { console.error('usage: node verify.js [--local] <eventId>'); process.exit(2); }
+let bySeq = new Map();
 const RELAYS = ['wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.snort.social', 'wss://relay.damus.io'];
 
 function judge(ev) {
@@ -27,6 +39,11 @@ function judge(ev) {
 }
 
 (async () => {
+  const text = await loadChainText();
+  const v = verifyChainText(text);
+  console.log(v.valid ? `chain: ${v.entries} entries re-hashed OK, head ${v.head.slice(0, 16)}…` : `chain: INVALID (${v.reason} at ${v.brokenAt})`);
+  if (!v.valid) process.exit(1);
+  bySeq = new Map(text.split('\n').filter(Boolean).map(l => JSON.parse(l)).map(e => [String(e.seq), e.hash]));
   let pass = 0;
   await Promise.all(RELAYS.map(async u => {
     try {
